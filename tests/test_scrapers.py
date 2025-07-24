@@ -119,16 +119,14 @@ class TestCryptoPanicScraper:
         """タイトル・URL抽出成功テスト"""
         mock_element = Mock()
         mock_title_cell = Mock()
-        mock_link = MockWebElement(text="Test News Title", href="https://cryptopanic.com/news/123")
         mock_title_text = MockWebElement(text="Test News Title")
 
-        mock_element.find_element.side_effect = [
-            mock_title_cell,  # .nc-title
-        ]
-        mock_title_cell.find_element.side_effect = [
-            mock_link,  # a
-            mock_title_text,  # .title-text span
-        ]
+        # a.nc-title要素のモック設定
+        mock_title_cell.get_attribute.return_value = "https://cryptopanic.com/news/123"
+        mock_title_cell.find_element.return_value = mock_title_text
+
+        # 親要素のモック設定
+        mock_element.find_element.return_value = mock_title_cell
 
         title, url = self.scraper._extract_title_and_url(mock_element)
 

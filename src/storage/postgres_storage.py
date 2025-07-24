@@ -73,20 +73,27 @@ class PostgresStorage:
 
     async def _insert_data_source(self, conn: asyncpg.Connection, data_source: DataSource) -> None:
         """データソースをdata_sourceテーブルに挿入"""
+        # Drizzleスキーマに合わせた最小限のinsert処理
+        # published_atのタイムゾーン情報を削除（PostgreSQLのtimestamp型に合わせる）
+        published_at = data_source.published_at
+        if published_at and published_at.tzinfo:
+            # タイムゾーン情報を削除してナイーブなdatetimeに変換
+            published_at = published_at.replace(tzinfo=None)
+
         # data_sourceテーブルに挿入
         await conn.execute(
             """
             INSERT INTO data_source (
-                id, type, url, summary, published_at, raw_content, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                id, type, url, summary, published_at, raw_content
+            ) VALUES ($1, $2, $3, $4, $5, $6)
             """,
             data_source.id,  # id
             data_source.type,  # type
             data_source.url,  # url
             data_source.summary,  # summary
-            data_source.published_at,  # published_at
+            published_at,  # published_at (タイムゾーンナイーブ)
             (json.dumps(data_source.raw_content) if data_source.raw_content else None),  # raw_content (JSON文字列)
-            data_source.created_at,  # created_at
+            # created_atは省略してPostgreSQLのdefaultNow()に任せる
         )
 
         self.logger.debug(f"Inserted data source: {data_source.summary[:50]}...")
@@ -160,6 +167,13 @@ class PostgresStorage:
                 WHERE type = 'news' AND published_at IS NOT NULL
                 """
             )
+
+            # 結果がある場合はタイムゾーン情報を確保
+            if result and not result.tzinfo:
+                from datetime import UTC
+
+                result = result.replace(tzinfo=UTC)
+
             return result
 
     async def close(self) -> None:

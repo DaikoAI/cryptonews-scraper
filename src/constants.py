@@ -65,11 +65,13 @@ DEFAULT_LOG_LEVEL = logging.INFO
 
 # ANSI色コード
 LOG_COLORS = {
-    "DEBUG": "\033[36m",  # シアン
-    "INFO": "\033[32m",  # 緑
+    "DEBUG": "\033[32m",  # 緑
+    "INFO": "\033[36m",  # シアン
     "WARNING": "\033[33m",  # 黄
+    "WARN": "\033[33m",  # 黄
     "ERROR": "\033[31m",  # 赤
-    "CRITICAL": "\033[35m",  # マゼンタ
+    "CRITICAL": "\033[31m",  # 赤
+    "LOG": "",  # 色なし
 }
 
 LOG_ICONS = {

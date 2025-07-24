@@ -6,14 +6,12 @@ Colored Logger Utility for Python Railway Template
 
 import logging
 import sys
+from datetime import datetime
 
 from src.constants import (
-    ANSI_BOLD,
-    ANSI_GRAY,
     ANSI_RESET,
     DEFAULT_LOG_LEVEL,
     LOG_COLORS,
-    LOG_ICONS,
 )
 
 
@@ -22,20 +20,23 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """ログレコードをフォーマット"""
-        # 色とアイコンを取得
+        # 色を取得
         color = LOG_COLORS.get(record.levelname, "")
-        icon = LOG_ICONS.get(record.levelname, "")
 
-        # レベル名を色付けし、アイコンを追加
-        colored_level = f"{color}{ANSI_BOLD}{icon} {record.levelname}{ANSI_RESET}"
+        # タイムスタンプを正確に作成（LogRecordの時刻からdatetimeオブジェクトを作成）
+        dt = datetime.fromtimestamp(record.created)
+        timestamp = f"[{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{dt.microsecond // 1000:03d}Z]"
+        level_tag = f"[{record.levelname}]"
+        message = record.getMessage()
 
-        # メッセージを色付け
-        colored_message = f"{color}{record.getMessage()}{ANSI_RESET}"
+        # 全体メッセージを構築
+        full_message = f"{timestamp} {level_tag} {message}"
 
-        # タイムスタンプを薄い色で
-        timestamp = f"{ANSI_GRAY}{self.formatTime(record, '%Y-%m-%d %H:%M:%S')}{ANSI_RESET}"
-
-        return f"{timestamp} {colored_level} {colored_message}"
+        # 色が設定されている場合は全体に色を適用
+        if color:
+            return f"{color}{full_message}{ANSI_RESET}"
+        else:
+            return full_message
 
 
 def setup_logger(name: str = __name__, level: int = DEFAULT_LOG_LEVEL, enable_colors: bool = True) -> logging.Logger:

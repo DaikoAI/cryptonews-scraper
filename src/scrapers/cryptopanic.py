@@ -48,15 +48,23 @@ class CryptoPanicScraper(BaseScraper):
     def _process_article_elements(self, elements: list) -> list[DataSource]:
         """記事要素を処理してDataSourceリストを生成"""
         data_sources = []
-        for element in elements:
+        successful_extractions = 0
+        failed_extractions = 0
+
+        for i, element in enumerate(elements):
             try:
                 data_source = self._extract_data_source(element)
                 if data_source and data_source.is_valid():
                     data_sources.append(data_source)
+                    successful_extractions += 1
+                else:
+                    failed_extractions += 1
             except Exception as e:
-                self.logger.debug(f"Failed to process element: {e}")
+                failed_extractions += 1
+                self.logger.warning(f"Exception processing element {i + 1}: {e}")
                 continue
 
+        self.logger.info(f"Processing complete: {successful_extractions} successful, {failed_extractions} failed")
         self.logger.info(f"Successfully extracted {len(data_sources)} valid data sources")
         return data_sources
 
@@ -96,17 +104,27 @@ class CryptoPanicScraper(BaseScraper):
         """記事要素からDataSourceを抽出"""
         try:
             title, url = self._extract_title_and_url(element)
+
             if not title or not url:
                 return None
 
-            return DataSource.from_cryptopanic_news(
+            published_at = self._extract_published_time(element)
+            currencies = self._extract_currencies(element)
+            source_domain = self._extract_source_domain(element)
+
+            data_source = DataSource.from_cryptopanic_news(
                 title=title.strip(),
                 url=self._normalize_url(url),
-                published_at=self._extract_published_time(element),
-                currencies=self._extract_currencies(element),
-                source_domain=self._extract_source_domain(element),
+                published_at=published_at,
+                currencies=currencies,
+                source_domain=source_domain,
                 scraped_at=datetime.now(UTC),
             )
+
+            if data_source.is_valid():
+                return data_source
+            else:
+                return None
 
         except Exception as e:
             self.logger.debug(f"Failed to extract data source: {e}")
@@ -115,21 +133,39 @@ class CryptoPanicScraper(BaseScraper):
     def _extract_title_and_url(self, element) -> tuple[str | None, str | None]:
         """タイトルとURLを抽出"""
         try:
-            # .nc-title 内のリンクとタイトルテキストを取得
-            title_cell = element.find_element(By.CSS_SELECTOR, ".nc-title")
-            link_element = title_cell.find_element(By.CSS_SELECTOR, "a")
+            # .nc-title要素自体がaタグ
+            title_cell = element.find_element(By.CSS_SELECTOR, "a.nc-title")
 
-            # 正しいタイトルテキストの抽出
+            # URLはnc-title要素のhref属性から取得
+            url = title_cell.get_attribute("href")
+
+            # タイトルは.title-text > span:first-childから取得
             title_text_element = title_cell.find_element(By.CSS_SELECTOR, ".title-text > span:first-child")
-
             title = title_text_element.text.strip()
-            url = link_element.get_attribute("href")
 
             return title, url
 
         except NoSuchElementException as e:
-            self.logger.debug(f"Failed to extract title/URL: {e}")
-            return None, None
+            self.logger.debug(f"Failed to extract title/URL - missing element: {e}")
+            # フォールバック: 古い構造のケース
+            try:
+                # 古い構造の場合
+                title_cell = element.find_element(By.CSS_SELECTOR, ".nc-title")
+                link_element = title_cell.find_element(By.CSS_SELECTOR, "a")
+                title = link_element.text.strip()
+                url = link_element.get_attribute("href")
+                return title, url
+            except NoSuchElementException:
+                # 最後のフォールバック: より単純なセレクタを試す
+                try:
+                    # さらに単純なセレクタを試す
+                    title_link = element.find_element(By.CSS_SELECTOR, "a")
+                    title = title_link.text.strip()
+                    url = title_link.get_attribute("href")
+                    return title, url
+                except NoSuchElementException:
+                    self.logger.debug("All extraction methods failed")
+                    return None, None
 
     def _extract_published_time(self, element) -> datetime | None:
         """公開時刻を抽出"""
@@ -146,14 +182,17 @@ class CryptoPanicScraper(BaseScraper):
             try:
                 # GMT+0900 部分を削除してパース
                 cleaned_datetime = re.sub(r"\s+GMT[+-]\d{4}\s+\([^)]+\)", "", datetime_attr)
-                return datetime.strptime(cleaned_datetime, "%a %b %d %Y %H:%M:%S")
-            except ValueError:
+                parsed_dt = datetime.strptime(cleaned_datetime, "%a %b %d %Y %H:%M:%S")
+                # UTCタイムゾーンを追加
+                return parsed_dt.replace(tzinfo=UTC)
+            except ValueError as e:
                 # フォールバック: 現在時刻を使用
-                self.logger.debug(f"Could not parse datetime: {datetime_attr}")
+                self.logger.debug(f"Could not parse datetime '{datetime_attr}': {e}")
                 return datetime.now(UTC)
 
         except NoSuchElementException:
-            return None
+            # フォールバック: 現在時刻を使用
+            return datetime.now(UTC)
 
     def _extract_currencies(self, element) -> list[str]:
         """関連通貨を抽出"""
