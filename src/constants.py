@@ -37,7 +37,9 @@ RAILWAY_PROJECT_ID = "RAILWAY_PROJECT_ID"
 
 # Chrome設定
 CHROME_WINDOW_SIZE = "1920,1080"
-CHROME_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+CHROME_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # Firefox設定
 FIREFOX_WINDOW_WIDTH = "1920"

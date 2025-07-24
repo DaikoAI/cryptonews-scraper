@@ -49,14 +49,37 @@ class WebDriverManager:
         return Config.get_selenium_remote_url()
 
     def _create_chrome_options(self) -> ChromeOptions:
-        """Chrome用オプションを作成"""
+        """Chrome用オプションを作成 - 実ブラウザ近似版"""
         options = ChromeOptions()
+
+        # 基本的なセキュリティ無効化
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        options.add_argument("--headless")  # ヘッドレスモード追加
+        options.add_argument("--headless")
+
+        # 画面サイズとUser-Agent
         options.add_argument(f"--window-size={CHROME_WINDOW_SIZE}")
         options.add_argument(f"--user-agent={CHROME_USER_AGENT}")
+
+        # 自動化検出回避
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option("useAutomationExtension", False)
+
+        # パフォーマンス最適化
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-plugins")
+        options.add_argument("--disable-images")  # 画像読み込み無効化で高速化
+
+        # セキュリティ設定
+        options.add_argument("--disable-web-security")
+        options.add_argument("--allow-running-insecure-content")
+
+        # メモリとリソース管理
+        options.add_argument("--memory-pressure-off")
+        options.add_argument("--max_old_space_size=4096")
+
         return options
 
     def _create_firefox_options(self) -> FirefoxOptions:

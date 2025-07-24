@@ -16,6 +16,7 @@ help:
 	@echo "  lint          Lint code with ruff"
 	@echo "  lint-fix      Auto-fix lint issues"
 	@echo "  check         Run both lint and format check"
+	@echo "  setup-hooks   Setup git pre-commit hooks for auto-formatting"
 	@echo ""
 	@echo "🧪 Testing & Running:"
 	@echo "  test          Run tests"
@@ -63,12 +64,27 @@ check:
 
 # コードフォーマット（自動修正）
 format:
-	uv run ruff check --fix .
+	uv run ruff check --fix --fix-only .
 	uv run ruff format .
 
-# リント実行
+# リント実行（修正なし）
 lint:
 	uv run ruff check .
+
+# リント実行（自動修正あり）
+lint-fix:
+	uv run ruff check --fix .
+
+# Git pre-commitフックを設定（自動フォーマット）
+setup-hooks:
+	@echo "🪝 Setting up git pre-commit hooks..."
+	@mkdir -p .git/hooks
+	@echo '#!/bin/sh' > .git/hooks/pre-commit
+	@echo 'echo "🧹 Auto-formatting code before commit..."' >> .git/hooks/pre-commit
+	@echo 'make format' >> .git/hooks/pre-commit
+	@echo 'git add -u' >> .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "✅ Pre-commit hook installed! Code will be auto-formatted before each commit."
 
 # テスト実行
 test:

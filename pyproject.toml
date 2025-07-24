@@ -40,6 +40,7 @@ select = [
  "UP", # pyupgrade
 ]
 fixable = ["ALL"]  # 自動修正可能なルールをすべて有効化
+unfixable = []     # 自動修正を無効にするルールはなし
 
 [tool.ruff.lint.isort]
 force-single-line = false
@@ -48,3 +49,4 @@ combine-as-imports = true
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+line-ending = "auto"
