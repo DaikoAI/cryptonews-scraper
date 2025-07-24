@@ -1,0 +1,313 @@
+# Python Development Rules
+
+## Code Style & Formatting
+
+- Use **Python 3.12+** features and type hints consistently
+- Follow **PEP 8** style guidelines
+- Maximum line length: **120 characters**
+- Use **double quotes** for strings
+- Use **4 spaces** for indentation
+- Add docstrings to all public functions, classes, and modules using Google style
+- Use meaningful variable names and avoid abbreviations
+
+## Type Safety & Type Hints
+
+### Basic Type Annotations
+- **ALWAYS** use type hints for function parameters and return values
+- Use modern typing features (e.g., `list[str]` instead of `List[str]` for Python 3.9+)
+- Annotate all class attributes and instance variables
+- Use `typing.Final` for constants that should not be reassigned
+
+```python
+from typing import Final, Optional, Union
+from collections.abc import Sequence
+
+# Constants
+MAX_RETRIES: Final[int] = 3
+API_BASE_URL: Final[str] = "https://api.example.com"
+
+# Function with complete type annotations
+def process_data(
+    items: Sequence[str], 
+    timeout: float = 30.0,
+    strict_mode: bool = False
+) -> dict[str, int]:
+    """Process items and return result mapping."""
+    pass
+
+# Class with annotated attributes
+class DataProcessor:
+    def __init__(self, config: dict[str, str]) -> None:
+        self.config: dict[str, str] = config.copy()
+        self.cache: dict[str, Any] = {}
+        self.processed_count: int = 0
+```
+
+### Advanced Type Annotations
+
+#### Generic Types and TypeVars
+```python
+from typing import TypeVar, Generic, Protocol
+from collections.abc import Callable, Iterator
+
+T = TypeVar('T')
+K = TypeVar('K')
+V = TypeVar('V')
+
+class Container(Generic[T]):
+    def __init__(self) -> None:
+        self._items: list[T] = []
+    
+    def add(self, item: T) -> None:
+        self._items.append(item)
+    
+    def get_all(self) -> list[T]:
+        return self._items.copy()
+
+def transform_items(
+    items: list[T], 
+    transform_fn: Callable[[T], K]
+) -> list[K]:
+    return [transform_fn(item) for item in items]
+```
+
+#### Protocol for Structural Typing
+```python
+from typing import Protocol
+
+class Drawable(Protocol):
+    def draw(self) -> None: ...
+
+class Movable(Protocol):
+    def move(self, x: int, y: int) -> None: ...
+
+def render_shape(shape: Drawable) -> None:
+    shape.draw()
+
+# Any class with a draw() method can be used
+class Circle:
+    def draw(self) -> None:
+        print("Drawing circle")
+```
+
+#### Union Types and Optional
+```python
+from typing import Union, Optional, Literal
+
+# Use Union for multiple possible types
+def process_id(user_id: Union[int, str]) -> str:
+    return str(user_id)
+
+# Python 3.10+ union syntax
+def process_id_modern(user_id: int | str) -> str:
+    return str(user_id)
+
+# Use Optional for nullable values
+def find_user(user_id: int) -> Optional[dict[str, str]]:
+    # Returns user dict or None
+    pass
+
+# Use Literal for specific values
+def set_log_level(level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]) -> None:
+    pass
+```
+
+#### TypedDict for Dictionary Schemas
+```python
+from typing import TypedDict, Required, NotRequired
+
+class UserData(TypedDict):
+    id: int
+    name: str
+    email: str
+    age: NotRequired[int]  # Optional field in Python 3.11+
+    is_active: NotRequired[bool]
+
+class StrictUserData(TypedDict, total=False):
+    id: Required[int]  # Required field even when total=False
+    name: Required[str]
+    age: int  # Optional
+    phone: str  # Optional
+
+def create_user(data: UserData) -> None:
+    # TypedDict ensures dictionary structure
+    pass
+```
+
+### Import Organization
+```python
+# Standard library imports
+import logging
+import sys
+from pathlib import Path
+
+# Third-party imports
+import selenium
+from selenium import webdriver
+
+# Local imports
+from src.module import function
+```
+
+## Error Handling
+
+### Custom Exception Types
+```python
+from typing import Optional
+
+class ValidationError(Exception):
+    def __init__(self, message: str, field: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.field = field
+
+class ProcessingError(Exception):
+    def __init__(self, message: str, error_code: int) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+```
+
+### Result Type Pattern
+```python
+from typing import Union, Generic, TypeVar
+from dataclasses import dataclass
+
+T = TypeVar('T')
+E = TypeVar('E')
+
+@dataclass
+class Success(Generic[T]):
+    value: T
+
+@dataclass
+class Failure(Generic[E]):
+    error: E
+
+Result = Union[Success[T], Failure[E]]
+
+def safe_divide(a: float, b: float) -> Result[float, str]:
+    if b == 0:
+        return Failure("Division by zero")
+    return Success(a / b)
+
+def handle_result(result: Result[float, str]) -> None:
+    match result:
+        case Success(value):
+            print(f"Result: {value}")
+        case Failure(error):
+            print(f"Error: {error}")
+```
+
+## Code Patterns
+
+### Context Managers
+```python
+from contextlib import contextmanager
+from typing import Generator
+
+@contextmanager
+def managed_resource() -> Generator[Resource, None, None]:
+    resource = acquire_resource()
+    try:
+        yield resource
+    finally:
+        release_resource(resource)
+```
+
+### Data Classes
+```python
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass(frozen=True)
+class User:
+    name: str
+    email: str
+    age: Optional[int] = None
+    
+    def is_adult(self) -> bool:
+        return self.age is not None and self.age >= 18
+```
+
+### Async/Await
+```python
+import asyncio
+from typing import List
+
+async def fetch_data(url: str) -> dict:
+    # async implementation
+    pass
+
+async def main() -> None:
+    tasks = [fetch_data(url) for url in urls]
+    results = await asyncio.gather(*tasks)
+```
+
+## Function Definitions
+
+```python
+def function_name(param: str, optional: int = 0) -> dict[str, Any]:
+    """Brief description.
+    
+    Args:
+        param: Description of the parameter
+        optional: Description of the optional parameter
+        
+    Returns:
+        Description of return value
+        
+    Raises:
+        ValueError: When param is invalid
+    """
+    if not param:
+        raise ValueError("param cannot be empty")
+    
+    return {"param": param, "optional": optional}
+```
+
+## Testing
+
+- Write tests using `pytest`
+- Aim for >80% test coverage
+- Use `pytest-cov` for coverage reporting
+- Follow AAA pattern (Arrange, Act, Assert) in tests
+- Use fixtures for test setup and teardown
+
+```python
+import pytest
+from typing import Generator
+
+@pytest.fixture
+def sample_data() -> Generator[dict[str, str], None, None]:
+    data = {"key": "value"}
+    yield data
+    # cleanup if needed
+
+def test_function_behavior(sample_data: dict[str, str]) -> None:
+    # Arrange
+    expected = "processed_value"
+    
+    # Act
+    result = process_function(sample_data)
+    
+    # Assert
+    assert result == expected
+```
+
+## Performance
+
+- Use `asyncio` for I/O bound operations
+- Consider using `concurrent.futures` for CPU-bound parallel tasks
+- Profile code with `cProfile` when performance is critical
+- Use generators and iterators for memory efficiency
+
+## Security
+
+- Validate all user inputs
+- Use `secrets` module for cryptographic operations
+- Never commit sensitive data (API keys, passwords) to version control
+- Use environment variables for configuration 
+
+async def main() -> None:
+    tasks = [fetch_data(url) for url in urls]
+    results = await asyncio.gather(*tasks)
+``` 

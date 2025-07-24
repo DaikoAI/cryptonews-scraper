@@ -1,0 +1,247 @@
+# Python Railway Template - Project Rules
+
+## Project Overview
+This is a modern Python template for Railway deployment featuring:
+- **uv** for dependency management
+- **Ruff** for linting and formatting
+- **Docker** multi-stage builds
+- **Selenium** for web scraping examples
+- **Pytest** for testing
+- **Makefile** for development commands
+
+## File Organization
+
+### Project Structure
+```
+python-railway-template/
+├── src/                   # Source code (flat structure)
+│   ├── __init__.py       # Package initialization
+│   └── main.py           # Main application logic
+├── tests/                # Test files
+├── .cursor/              # Cursor configuration
+│   └── rules/           # Cursor rules
+├── Dockerfile            # Multi-stage Docker build
+├── Makefile             # Development commands
+├── railway.toml         # Railway deployment config
+├── pyproject.toml       # Project configuration
+├── uv.lock             # Locked dependencies
+└── README.md           # Project documentation
+```
+
+### Flat Source Structure
+- **Keep `src/` directory flat** - avoid nested package structures
+- **No `src/project_name/` subdirectory** - place Python files directly in `src/`
+- **Organize by responsibility** not by file type
+
+## Dependencies Management
+
+### Core Principles
+- **Keep dependencies minimal and purposeful**
+- **Use uv for all dependency management**
+- **Separate dev dependencies from production dependencies**
+
+### Adding Dependencies
+```bash
+# Production dependencies
+uv add package-name
+
+# Development dependencies
+uv add --dev package-name
+
+# Optional dependencies
+uv add --optional extra-name package-name
+```
+
+### pyproject.toml Configuration
+```toml
+[project]
+name = "python-railway-template"
+version = "0.1.0"
+description = "Modern Python template for Railway deployment"
+requires-python = ">=3.12"
+dependencies = [
+    "selenium>=4.34.0",
+]
+
+[project.scripts]
+app = "src.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "ruff>=0.12.4",
+]
+```
+
+## Development Commands
+
+### Makefile Commands
+Use npm-style commands for development workflow:
+
+```bash
+make help        # Show all available commands
+make install     # Install dependencies
+make dev         # Install dev dependencies
+make format      # Format code with ruff
+make lint        # Lint code with ruff
+make lint-fix    # Auto-fix lint issues
+make check       # Run both lint and format check
+make test        # Run tests
+make run         # Run the application
+make clean       # Clean cache files
+```
+
+### Direct uv Commands (Faster)
+```bash
+uv run ruff format src/      # Format code
+uv run ruff check src/       # Lint code
+uv run ruff check --fix src/ # Auto-fix issues
+uv run pytest               # Run tests
+uv run app                   # Run application
+```
+
+## Code Organization
+
+### Entry Point
+- **Main application logic in `src/main.py`**
+- **Entry point function named `main()`**
+- **Use `if __name__ == "__main__":` pattern**
+
+```python
+def main() -> None:
+    """Main application entry point."""
+    logger = setup_logger()
+    
+    try:
+        # Application logic here
+        result = run_application()
+        
+        if result["status"] == "success":
+            print("✅ Application completed successfully!")
+        else:
+            print(f"❌ Application failed: {result.get('error')}")
+            sys.exit(1)
+            
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+        print(f"❌ Application failed: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Package Initialization
+- **Keep `src/__init__.py` minimal**
+- **Import only essential functions for package API**
+
+```python
+"""Python Railway Template - Modern Python template for Railway deployment."""
+
+from src.main import main
+
+__version__ = "0.1.0"
+__all__ = ["main"]
+```
+
+## Testing Guidelines
+
+### Test Organization
+- **Write tests in `tests/` directory**
+- **Mirror source structure in tests**
+- **Use descriptive test names**
+
+```python
+def test_main_function_returns_success_result() -> None:
+    """Test that main function returns success result for valid input."""
+    # Test implementation
+    pass
+
+def test_main_function_handles_selenium_errors() -> None:
+    """Test that main function properly handles Selenium WebDriver errors."""
+    # Test implementation
+    pass
+```
+
+### Test Coverage
+- **Aim for >80% test coverage**
+- **Test both success and failure cases**
+- **Include integration tests for Selenium functionality**
+
+## Docker Guidelines
+
+### Multi-stage Build
+- **Use multi-stage builds for optimization**
+- **Separate builder and production stages**
+- **Install Chrome and ChromeDriver in builder stage**
+
+### Security Best Practices
+- **Run as non-root user**
+- **Use minimal base images**
+- **Copy only necessary files**
+
+### Environment Variables
+```dockerfile
+ENV PYTHONUNBUFFERED=1
+ENV UV_COMPILE_BYTECODE=1
+```
+
+## Deployment Guidelines
+
+### Railway Configuration
+- **Use `railway.toml` for deployment configuration**
+- **Configure restart policies**
+- **Set appropriate environment variables**
+
+```toml
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+sleepApplication = false
+```
+
+### Environment Variables
+- **Use environment variables for configuration**
+- **Never commit secrets to version control**
+- **Document required environment variables in README**
+
+## Template Customization
+
+### For New Projects
+1. **Update `pyproject.toml`** with your project details
+2. **Replace example code in `src/main.py`**
+3. **Add your dependencies with `uv add`**
+4. **Update README.md** with project-specific information
+5. **Configure environment variables** as needed
+
+### Example Replacement
+Replace the Selenium example with your application logic:
+
+```python
+def your_application_logic() -> dict[str, str]:
+    """Replace this with your actual application logic."""
+    # Your code here
+    return {"status": "success", "message": "Application completed"}
+```
+
+## Selenium Example Guidelines
+
+### Current Implementation
+The template includes a Selenium example for:
+- **Verifying Chrome headless operation**
+- **Testing Docker environment compatibility**
+- **Demonstrating error handling patterns**
+
+### For Web Scraping Projects
+- **Keep the Selenium setup pattern**
+- **Extend with your scraping logic**
+- **Add appropriate error handling**
+- **Use structured logging**
+
+### For Non-Scraping Projects
+- **Remove Selenium dependency**: `uv remove selenium`
+- **Replace example code with your logic**
+- **Keep the application structure pattern**

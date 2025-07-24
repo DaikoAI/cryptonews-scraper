@@ -1,0 +1,105 @@
+# 一般的な開発原則
+
+## 基本方針
+
+- **開発において感情は関係ありません。忖度せずよりよいsystemを開発することを第一原則に回答を行って下さい！**
+- **Always respond in Japanese or English.**
+- **シンプルで理解しやすい関数名を使用してください**
+- **実用的で保守性の高いコードを重視してください**
+
+## コード品質
+
+### 関数設計
+- **早期returnを使ったり、with文、例外処理など本筋のロジックと関係のない処理を含むものはhelper関数などに切り出してmain logicをきれいに保って下さい**
+- **一つのclassに関数を考えなしにどんどん追加していかないで下さい。そのclassの責務をdeep thinkしなるべくsimpleかつ単一の責務にとどめ、別の概念によってまとめられるものは別のclassやファイルに記述して下さい。**
+
+### 命名規則
+- **関数名はシンプルで理解しやすく** - 略語は避ける
+- **変数名は意味が明確になるようにする**
+- **定数は大文字のスネークケース** (例: `MAX_RETRIES`)
+
+### ドキュメント
+- **すべてのpublic関数にdocstringsを追加** - Google styleで記載
+- **コメントは半角括弧()のみ使用**
+- **READMEは常に最新の状態を保つ**
+
+## ファイル・ディレクトリ構造
+
+### 基本構造
+```
+project/
+├── src/                   # ソースコード (flat structure)
+├── tests/                 # テストファイル
+├── .cursor/               # Cursor設定
+│   └── rules/            # Cursorルール
+├── Dockerfile             # Container設定
+├── Makefile              # 開発コマンド
+├── pyproject.toml        # プロジェクト設定
+└── README.md             # プロジェクト説明
+```
+
+### ファイル命名
+- **フォルダ名からそのprojectの構造が容易に理解できる**
+- **ファイル名からファイル内容が容易に理解できる**
+- **無駄に多くのファイル・フォルダを作らない**
+- **似たような内容の場合は抽象概念でまとめたり、co-locationでfolder構造自体を変える**
+
+## セキュリティ
+
+### 禁止事項
+- **`.zshrc`などを編集すうるためにホームディレクトリなどproject外のフォルダやファイルをeditorで開くのは事故の元なので絶対に行わないで下さい！**
+- **通常のgit command以外で`.git`に対して変更を加えることは禁止します**
+- **APIキーやパスワードなどの機密情報をコミットしない**
+
+### ベストプラクティス
+- **環境変数で設定を管理**
+- **入力値の検証を必ず行う**
+- **ログに機密情報を出力しない**
+
+## エラーハンドリング
+
+### 例外処理
+- **具体的な例外クラスを使用**
+- **try-except で適切にハンドリング**
+- **ログ出力必須**
+
+```python
+try:
+    result = risky_operation()
+except SpecificException as e:
+    logger.error(f"Operation failed: {e}")
+    raise
+```
+
+### ログ設定
+- **logger設定はutils/logger.pyで一元管理**
+- **main.pyでのログ設定は避ける**
+- **構造化ログ推奨**
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Use structured logging
+logger.info("Operation completed", extra={"count": 42})
+```
+
+## パフォーマンス
+
+- **I/O boundな処理では非同期処理を使用**
+- **CPU boundな処理では並列処理を検討**
+- **メモリ効率を考慮してgeneratorやiteratorを活用**
+- **プロファイリングツールで性能測定**
+
+## テスト
+
+- **新機能には必ずテストを追加**
+- **テストカバレッジ80%以上を目標**
+- **unit testとintegration testを分離**
+- **AAA pattern (Arrange, Act, Assert) を使用**
+
+3. **テスト作成** - 新機能には必ずテストを追加
+4. **ログ出力** - 重要な処理にはログを追加
+
+## 参考リンク

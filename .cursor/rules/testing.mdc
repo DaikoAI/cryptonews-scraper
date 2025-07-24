@@ -1,0 +1,416 @@
+# テスト戦略とpytest使用ルール
+
+## テスト戦略
+
+### テストピラミッド
+```
+    🔺 E2E Tests (少数)
+   🔺🔺 Integration Tests (中程度)
+  🔺🔺🔺 Unit Tests (多数)
+```
+
+### テストレベル
+1. **Unit Tests** - 個別関数・クラスのテスト
+2. **Integration Tests** - コンポーネント間の連携テスト
+3. **E2E Tests** - エンドツーエンドの動作テスト
+
+### カバレッジ目標
+- **全体カバレッジ: 80%以上**
+- **新規コード: 90%以上**
+- **クリティカルパス: 100%**
+
+## pytest設定
+
+### pyproject.toml設定
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config", 
+    "--verbose",
+    "--tb=short",
+    "--cov=src",
+    "--cov-report=html:htmlcov",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=80",
+    "--durations=10"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "selenium: marks tests that use selenium",
+    "docker: marks tests that require docker"
+]
+```
+
+### ディレクトリ構造
+```
+tests/
+├── conftest.py              # 共通fixture定義
+├── unit/                    # ユニットテスト
+│   ├── test_main.py
+│   └── test_utils.py
+├── integration/             # 統合テスト
+│   ├── test_selenium.py
+│   └── test_docker.py
+└── fixtures/                # テストデータ
+    ├── sample_data.json
+    └── mock_responses.py
+```
+
+## テスト作成ルール
+
+### AAA パターン
+すべてのテストは以下の構造に従う：
+
+```python
+def test_function_behavior() -> None:
+    """Test that function behaves correctly with valid input."""
+    # Arrange - テストデータとモックの準備
+    input_data = {"key": "value"}
+    expected_result = {"processed": True}
+    
+    # Act - テスト対象の実行
+    result = target_function(input_data)
+    
+    # Assert - 結果の検証
+    assert result == expected_result
+```
+
+### 命名規則
+```python
+# ✅ Good: 具体的で分かりやすい
+def test_main_function_returns_success_when_selenium_runs_correctly() -> None:
+    pass
+
+def test_main_function_raises_webdriver_exception_when_chrome_not_found() -> None:
+    pass
+
+# ❌ Bad: 抽象的で分かりにくい
+def test_main() -> None:
+    pass
+
+def test_error_case() -> None:
+    pass
+```
+
+### テスト関数の構造
+```python
+import pytest
+from typing import Any
+from unittest.mock import Mock, patch
+
+def test_selenium_driver_initialization_success() -> None:
+    """Test successful Chrome WebDriver initialization."""
+    # Arrange
+    expected_options = ["--headless", "--no-sandbox", "--disable-dev-shm-usage"]
+    
+    # Act & Assert
+    with patch("selenium.webdriver.Chrome") as mock_chrome:
+        mock_driver = Mock()
+        mock_chrome.return_value = mock_driver
+        
+        driver = initialize_driver()
+        
+        # Verify driver was created
+        mock_chrome.assert_called_once()
+        assert driver == mock_driver
+        
+        # Verify options were set
+        call_args = mock_chrome.call_args
+        options = call_args[1]["options"]
+        for option in expected_options:
+            assert option in options.arguments
+```
+
+## Fixture 使用方法
+
+### conftest.py での共通fixture定義
+```python
+import pytest
+from typing import Generator, Dict, Any
+from unittest.mock import Mock, patch
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+@pytest.fixture(scope="session")
+def chrome_options() -> Options:
+    """Chrome WebDriver options for testing."""
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    return options
+
+@pytest.fixture(scope="function")
+def mock_webdriver() -> Generator[Mock, None, None]:
+    """Mock WebDriver for testing."""
+    with patch("selenium.webdriver.Chrome") as mock_driver:
+        mock_instance = Mock()
+        mock_driver.return_value = mock_instance
+        yield mock_instance
+
+@pytest.fixture(scope="function")
+def sample_scraped_data() -> Dict[str, Any]:
+    """Sample data for testing scrapers."""
+    return {
+        "title": "Test Article",
+        "url": "https://example.com/test",
+        "content": "Test content",
+        "timestamp": "2024-01-01T00:00:00Z"
+    }
+
+@pytest.fixture(scope="function")
+def temp_file() -> Generator[str, None, None]:
+    """Create temporary file for testing."""
+    import tempfile
+    import os
+    
+    fd, path = tempfile.mkstemp()
+    try:
+        yield path
+    finally:
+        os.close(fd)
+        os.unlink(path)
+```
+
+### Fixture の使用例
+```python
+def test_scraper_with_mock_driver(mock_webdriver: Mock, sample_scraped_data: Dict[str, Any]) -> None:
+    """Test scraper with mocked WebDriver."""
+    # Arrange
+    mock_webdriver.get.return_value = None
+    mock_webdriver.find_element.return_value.text = sample_scraped_data["title"]
+    
+    # Act
+    result = scrape_article("https://example.com/test")
+    
+    # Assert
+    assert result["title"] == sample_scraped_data["title"]
+    mock_webdriver.get.assert_called_once_with("https://example.com/test")
+```
+
+## パラメータ化テスト
+
+### pytest.mark.parametrize の使用
+```python
+@pytest.mark.parametrize("input_url,expected_domain", [
+    ("https://example.com/article", "example.com"),
+    ("https://test.org/news", "test.org"),
+    ("http://localhost:8000/", "localhost"),
+])
+def test_extract_domain_from_url(input_url: str, expected_domain: str) -> None:
+    """Test domain extraction from various URL formats."""
+    result = extract_domain(input_url)
+    assert result == expected_domain
+
+@pytest.mark.parametrize("invalid_url", [
+    "",
+    "not-a-url",
+    "ftp://example.com",
+    None,
+])
+def test_extract_domain_raises_error_for_invalid_urls(invalid_url: str) -> None:
+    """Test that invalid URLs raise appropriate errors."""
+    with pytest.raises(ValueError):
+        extract_domain(invalid_url)
+```
+
+## 例外テスト
+
+### pytest.raises の使用
+```python
+def test_function_raises_specific_exception() -> None:
+    """Test that function raises specific exception with correct message."""
+    with pytest.raises(ValueError, match="Invalid input parameter"):
+        risky_function("invalid_input")
+
+def test_function_raises_exception_with_custom_attributes() -> None:
+    """Test exception with custom attributes."""
+    with pytest.raises(CustomException) as exc_info:
+        function_that_raises_custom_exception()
+    
+    assert exc_info.value.error_code == 400
+    assert "custom message" in str(exc_info.value)
+```
+
+## モックとパッチ
+
+### unittest.mock の使用
+```python
+from unittest.mock import Mock, patch, MagicMock, call
+
+def test_function_with_external_api_call() -> None:
+    """Test function that makes external API calls."""
+    with patch("requests.get") as mock_get:
+        # Arrange
+        mock_response = Mock()
+        mock_response.json.return_value = {"status": "success"}
+        mock_response.status_code = 200
+        mock_get.return_value = mock_response
+        
+        # Act
+        result = fetch_data_from_api("https://api.example.com/data")
+        
+        # Assert
+        assert result["status"] == "success"
+        mock_get.assert_called_once_with("https://api.example.com/data")
+
+@patch("src.main.webdriver.Chrome")
+def test_selenium_driver_quit_called(mock_chrome: Mock) -> None:
+    """Test that WebDriver quit is properly called."""
+    # Arrange
+    mock_driver = Mock()
+    mock_chrome.return_value = mock_driver
+    
+    # Act
+    with selenium_driver() as driver:
+        pass  # Context manager should handle quit
+    
+    # Assert
+    mock_driver.quit.assert_called_once()
+```
+
+## 非同期テスト
+
+### pytest-asyncio の使用
+```python
+import pytest
+import asyncio
+
+@pytest.mark.asyncio
+async def test_async_function() -> None:
+    """Test asynchronous function."""
+    # Arrange
+    expected_result = {"data": "test"}
+    
+    # Act
+    result = await async_fetch_data()
+    
+    # Assert
+    assert result == expected_result
+
+@pytest.mark.asyncio
+async def test_async_function_with_timeout() -> None:
+    """Test async function with timeout."""
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(slow_async_function(), timeout=1.0)
+```
+
+## マーカーの使用
+
+### カスタムマーカー
+```python
+import pytest
+
+@pytest.mark.slow
+def test_large_data_processing() -> None:
+    """Test that processes large amounts of data - marked as slow."""
+    pass
+
+@pytest.mark.integration
+def test_selenium_integration() -> None:
+    """Integration test with Selenium - requires browser."""
+    pass
+
+@pytest.mark.docker
+def test_docker_container_functionality() -> None:
+    """Test that requires Docker container."""
+    pass
+
+# テスト実行時の選択
+# uv run pytest -m "not slow"              # slowテストを除外
+# uv run pytest -m "integration"           # integrationテストのみ
+# uv run pytest -m "not (slow or docker)"  # slow と docker を除外
+```
+
+## テスト実行コマンド
+
+### 基本実行
+```bash
+# 全テスト実行
+uv run pytest
+
+# 特定ディレクトリ
+uv run pytest tests/unit/
+
+# 特定ファイル
+uv run pytest tests/test_main.py
+
+# 特定テスト関数
+uv run pytest tests/test_main.py::test_main_function_success
+
+# verbose出力
+uv run pytest -v
+
+# 詳細出力
+uv run pytest -vv
+```
+
+### カバレッジ付き実行
+```bash
+# カバレッジ測定
+uv run pytest --cov=src
+
+# HTMLレポート生成
+uv run pytest --cov=src --cov-report=html
+
+# 不足行表示
+uv run pytest --cov=src --cov-report=term-missing
+
+# カバレッジ閾値チェック
+uv run pytest --cov=src --cov-fail-under=80
+```
+
+### 並列実行
+```bash
+# CPU数に応じた並列実行
+uv run pytest -n auto
+
+# 指定数での並列実行
+uv run pytest -n 4
+```
+
+### デバッグ
+```bash
+# pdbでデバッグ
+uv run pytest --pdb
+
+# 最初の失敗で停止
+uv run pytest -x
+
+# 2回失敗で停止
+uv run pytest --maxfail=2
+
+# 遅いテストの表示
+uv run pytest --durations=10
+```
+
+## CI/CD での設定
+
+### GitHub Actions例
+```yaml
+- name: Run tests
+  run: |
+    uv run pytest \
+      --cov=src \
+      --cov-report=xml \
+      --cov-fail-under=80 \
+      --junit-xml=test-results.xml
+```
+
+### 継続的テスト品質保証
+- **カバレッジの漸進的向上**: 徐々に閾値を上げる
+- **フレイキーテストの検出**: 同じテストを複数回実行
+- **パフォーマンステスト**: `--durations` でボトルネック検出
+description:
+globs:
+alwaysApply: false
+---

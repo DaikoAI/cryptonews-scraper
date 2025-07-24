@@ -1,0 +1,43 @@
+# ローカル開発専用 Docker Compose 構成
+# Railway本番環境では使用できません
+
+services:
+  # Selenium standalone for ARM (M1 Mac compatible)
+  selenium:
+    # ARM環境（M1 Mac など）用のイメージ
+    image: seleniarm/standalone-chromium:latest
+    container_name: selenium-chrome
+    ports:
+      - "4444:4444"  # Selenium Server port
+      - "5900:5900"  # VNC port
+      - "7900:7900"  # noVNC port
+    # コンテナが使用するメモリの上限を設定
+    shm_size: "2gb"
+    environment:
+      - VNC_NO_PASSWORD=1  # VNCパスワードを無効化（オプション）
+
+  # Selenium Scraper Application (ローカル開発専用)
+  selenium-scraper:
+    build: .
+    container_name: selenium-scraper-app
+    depends_on:
+      - selenium
+    environment:
+      - SELENIUM_REMOTE_URL=http://selenium:4444
+      - SELENIUM_BROWSER=chrome  # or firefox
+    networks:
+      - default
+    volumes:
+      - ./reports:/app/reports  # For screenshots and outputs
+      # - ./src:/app/src  # Mount source for development (disabled for now)
+    command: ["python", "-m", "src.main"]
+    # ログ出力設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    driver: bridge

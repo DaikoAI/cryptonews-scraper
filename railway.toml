@@ -1,0 +1,10 @@
+# Railway Configuration for Selenium Scraper
+# 10分間隔でスクレイピングを自動実行
+
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+startCommand = "app"
+restartPolicyType = "NEVER"
+cronSchedule = "0 0 * * *"
