@@ -1,15 +1,11 @@
 [project]
-name = "python-railway-template"
+name = "cryptonews-scraper"
 version = "0.1.0"
-description = "Modern Python template for Railway deployment with uv, Ruff, and Docker"
+description = "Selenium Standalone Chromiumを使用したRemote WebDriverスクレイピングアプリケーションのテンプレートです。"
 readme = "README.md"
-authors = [
-    { name = "Asuma Yamada", email = "yamadaasuma@gmail.com" }
-]
+authors = [{ name = "Asuma Yamada" }]
 requires-python = ">=3.12"
-dependencies = [
-    "selenium>=4.34.0",
-]
+dependencies = ["selenium>=4.34.0"]
 
 [project.scripts]
 app = "src.main:main"
@@ -22,10 +18,7 @@ build-backend = "hatchling.build"
 packages = ["src"]
 
 [dependency-groups]
-dev = [
-    "pytest>=8.4.1",
-    "ruff>=0.12.4",
-]
+dev = ["pytest>=8.4.1", "ruff>=0.12.4"]
 
 # Ruff configuration
 [tool.ruff]
@@ -34,12 +27,12 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "UP", # pyupgrade
+ "E",  # pycodestyle errors
+ "W",  # pycodestyle warnings
+ "F",  # pyflakes
+ "I",  # isort
+ "B",  # flake8-bugbear
+ "UP", # pyupgrade
 ]
 
 [tool.ruff.format]

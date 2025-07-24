@@ -1,4 +1,4 @@
-# Python Railway Template - Selenium Standalone Chromium
+# cryptonews-scraper
 
 Selenium Standalone Chromium を使用した Remote WebDriver スクレイピングアプリケーションのテンプレートです。
 
