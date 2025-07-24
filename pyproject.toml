@@ -5,7 +5,13 @@ description = "Selenium Standalone Chromiumを使用したRemote WebDriverスク
 readme = "README.md"
 authors = [{ name = "Asuma Yamada" }]
 requires-python = ">=3.12"
-dependencies = ["selenium>=4.34.0"]
+dependencies = [
+    "selenium>=4.34.0",
+    "asyncpg>=0.30.0",
+    "python-dotenv>=1.0.0",
+    "beautifulsoup4>=4.13.4",
+    "python-dateutil>=2.8.2",
+]
 
 [project.scripts]
 app = "src.main:main"
@@ -18,7 +24,11 @@ build-backend = "hatchling.build"
 packages = ["src"]
 
 [dependency-groups]
-dev = ["pytest>=8.4.1", "ruff>=0.12.4"]
+dev = [
+    "pytest>=8.4.1",
+ "ruff>=0.12.4",
+ "pytest-asyncio>=0.25.0",
+]
 
 # Ruff configuration
 [tool.ruff]
@@ -34,7 +44,14 @@ select = [
  "B",  # flake8-bugbear
  "UP", # pyupgrade
 ]
+fixable = ["ALL"]  # 自動修正可能なルールをすべて有効化
+unfixable = []     # 自動修正を無効にするルールはなし
+
+[tool.ruff.lint.isort]
+force-single-line = false
+combine-as-imports = true
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+line-ending = "auto"

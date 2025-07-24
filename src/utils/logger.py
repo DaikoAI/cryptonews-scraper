@@ -5,15 +5,12 @@ Colored Logger Utility for Python Railway Template
 """
 
 import logging
-import sys
+import os
+from datetime import datetime
 
 from src.constants import (
-    ANSI_BOLD,
-    ANSI_GRAY,
     ANSI_RESET,
-    DEFAULT_LOG_LEVEL,
     LOG_COLORS,
-    LOG_ICONS,
 )
 
 
@@ -22,57 +19,68 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """ログレコードをフォーマット"""
-        # 色とアイコンを取得
+        # 色を取得
         color = LOG_COLORS.get(record.levelname, "")
-        icon = LOG_ICONS.get(record.levelname, "")
 
-        # レベル名を色付けし、アイコンを追加
-        colored_level = f"{color}{ANSI_BOLD}{icon} {record.levelname}{ANSI_RESET}"
+        # タイムスタンプを正確に作成（LogRecordの時刻からdatetimeオブジェクトを作成）
+        dt = datetime.fromtimestamp(record.created)
+        timestamp = f"[{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{dt.microsecond // 1000:03d}Z]"
+        level_tag = f"[{record.levelname}]"
+        message = record.getMessage()
 
-        # メッセージを色付け
-        colored_message = f"{color}{record.getMessage()}{ANSI_RESET}"
+        # 全体メッセージを構築
+        full_message = f"{timestamp} {level_tag} {message}"
 
-        # タイムスタンプを薄い色で
-        timestamp = f"{ANSI_GRAY}{self.formatTime(record, '%Y-%m-%d %H:%M:%S')}{ANSI_RESET}"
+        # 色が設定されている場合は全体に色を適用
+        if color:
+            return f"{color}{full_message}{ANSI_RESET}"
+        else:
+            return full_message
 
-        return f"{timestamp} {colored_level} {colored_message}"
 
-
-def setup_logger(name: str = __name__, level: int = DEFAULT_LOG_LEVEL, enable_colors: bool = True) -> logging.Logger:
+def setup_logger(name: str) -> logging.Logger:
     """
-    色付きロガーを設定
+    ロガーを設定する
 
     Args:
         name: ロガー名
-        level: ログレベル
-        enable_colors: 色付きを有効にするか
 
     Returns:
-        設定済みロガー
+        設定されたロガー
     """
     logger = logging.getLogger(name)
 
-    # 既にハンドラーが設定されている場合はそのまま返す
+    # 環境変数からログレベルを取得（デフォルト: INFO）
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+
+    # ログレベルの変換
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+
+    numeric_level = level_map.get(log_level, logging.INFO)
+    logger.setLevel(numeric_level)
+
+    # ハンドラが既に存在する場合はスキップ
     if logger.handlers:
         return logger
 
-    logger.setLevel(level)
+    # コンソールハンドラを作成
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(numeric_level)
 
-    # コンソールハンドラー作成
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-
-    # フォーマッター設定
-    if enable_colors and sys.stdout.isatty():  # ターミナルでのみ色付け
-        formatter = ColoredFormatter()
-    else:
-        # 色なしフォーマッター
-        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-
+    # フォーマッタを作成
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     console_handler.setFormatter(formatter)
+
+    # ハンドラをロガーに追加
     logger.addHandler(console_handler)
 
-    # 親ロガーへの伝播を防ぐ
+    # 上位ロガーへの伝播を防ぐ
     logger.propagate = False
 
     return logger
@@ -93,7 +101,7 @@ def get_app_logger(module_name: str | None = None) -> logging.Logger:
     else:
         logger_name = "railway_app"
 
-    return setup_logger(logger_name, level=DEFAULT_LOG_LEVEL)
+    return setup_logger(logger_name)
 
 
 # デフォルトロガー

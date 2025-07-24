@@ -37,11 +37,25 @@ RAILWAY_PROJECT_ID = "RAILWAY_PROJECT_ID"
 
 # Chrome設定
 CHROME_WINDOW_SIZE = "1920,1080"
-CHROME_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+CHROME_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # Firefox設定
 FIREFOX_WINDOW_WIDTH = "1920"
 FIREFOX_WINDOW_HEIGHT = "1080"
+
+# ========================================
+# Scraping Configuration
+# ========================================
+
+# 並列処理設定（環境変数: SCRAPING_MAX_WORKERS）
+# 推奨値: 1-4（CPU使用量とメモリ使用量のバランス）
+DEFAULT_SCRAPING_MAX_WORKERS = 2
+
+# バッチサイズ設定（環境変数: SCRAPING_BATCH_SIZE）
+# 推奨値: 2-5（小さいほど安定、大きいほど高速）
+DEFAULT_SCRAPING_BATCH_SIZE = 5
 
 # ========================================
 # File and Directory Paths
@@ -65,11 +79,13 @@ DEFAULT_LOG_LEVEL = logging.INFO
 
 # ANSI色コード
 LOG_COLORS = {
-    "DEBUG": "\033[36m",  # シアン
-    "INFO": "\033[32m",  # 緑
+    "DEBUG": "\033[32m",  # 緑
+    "INFO": "\033[36m",  # シアン
     "WARNING": "\033[33m",  # 黄
+    "WARN": "\033[33m",  # 黄
     "ERROR": "\033[31m",  # 赤
-    "CRITICAL": "\033[35m",  # マゼンタ
+    "CRITICAL": "\033[31m",  # 赤
+    "LOG": "",  # 色なし
 }
 
 LOG_ICONS = {

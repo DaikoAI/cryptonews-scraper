@@ -16,6 +16,7 @@ help:
 	@echo "  lint          Lint code with ruff"
 	@echo "  lint-fix      Auto-fix lint issues"
 	@echo "  check         Run both lint and format check"
+	@echo "  setup-hooks   Setup git pre-commit hooks for auto-formatting"
 	@echo ""
 	@echo "🧪 Testing & Running:"
 	@echo "  test          Run tests"
@@ -56,26 +57,42 @@ install:
 dev:
 	uv sync --group dev
 
-# Code formatting and linting
-.PHONY: format
+# コード品質チェック
+check:
+	uv run ruff check .
+	uv run ruff format --check .
+
+# コードフォーマット（自動修正）
 format:
-	uv run ruff format src/
+	uv run ruff check --fix --fix-only .
+	uv run ruff format .
 
-.PHONY: lint
+# リント実行（修正なし）
 lint:
-	uv run ruff check src/
+	uv run ruff check .
 
-.PHONY: lint-fix
+# リント実行（自動修正あり）
 lint-fix:
-	uv run ruff check --fix src/
+	uv run ruff check --fix .
 
-.PHONY: check
-check: lint format
+# Git pre-commitフックを設定（自動フォーマット）
+setup-hooks:
+	@echo "🪝 Setting up git pre-commit hooks..."
+	@mkdir -p .git/hooks
+	@echo '#!/bin/sh' > .git/hooks/pre-commit
+	@echo 'echo "🧹 Auto-formatting code before commit..."' >> .git/hooks/pre-commit
+	@echo 'make format' >> .git/hooks/pre-commit
+	@echo 'git add -u' >> .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "✅ Pre-commit hook installed! Code will be auto-formatted before each commit."
 
-# Testing
-.PHONY: test
+# テスト実行
 test:
-	uv run python -m pytest
+	uv run pytest tests/ -v
+
+# アプリケーション実行
+run:
+	uv run python src/main.py
 
 # Selenium Grid management
 .PHONY: grid-up
@@ -103,18 +120,6 @@ grid-status:
 	@curl -s http://localhost:4444/status | jq . || echo "Grid not available or jq not installed"
 	@echo ""
 	@echo "📊 Grid Console: http://localhost:4444"
-
-# Run application
-.PHONY: run
-run:
-	@echo "🔍 Checking if Selenium Grid is running..."
-	@if ! curl -s http://localhost:4444/status > /dev/null 2>&1; then \
-		echo "❌ Selenium Grid is not running"; \
-		echo "💡 Start it with: make grid-up"; \
-		exit 1; \
-	fi
-	@echo "✅ Grid is running!"
-	uv run python src/main.py
 
 # Scraping commands
 .PHONY: scrape
@@ -170,10 +175,9 @@ docker-down:
 railway-deploy:
 	railway up
 
-# Cleanup
-.PHONY: clean
-clean: clean-python clean-docker
-	@echo "🧹 Complete cleanup finished!"
+# レポートファイルクリーンアップ
+clean:
+	rm -rf reports/*.json
 
 .PHONY: clean-python
 clean-python:

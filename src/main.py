@@ -1,94 +1,127 @@
 """
-Python Railway Template - Selenium Standalone Chromium Example
+CryptoPanic News Scraper
 
-Remote WebDriver with Standalone Chromium を使用したスクレイピングアプリケーション
+メインスクレイピングアプリケーション
+効率的な差分更新 - 新規記事がある場合のみスクレイピング実行
 """
 
-import os
-import sys
 from datetime import datetime
 
-from src.constants import (
-    APP_TITLE,
-    BANNER_LENGTH,
-    DEFAULT_BROWSER,
-    DEFAULT_REMOTE_URL_DOCKER,
-    SEPARATOR_LENGTH,
-    VNC_URL,
-)
-from src.scraper import create_scraper_from_env, scrape_test_page
+from src.scrapers import CryptoPanicScraper
+from src.storage import PostgresStorage
 from src.utils.logger import get_app_logger
+from src.webdriver import create_webdriver_from_env
 
 
-def print_banner(logger, browser: str, remote_url: str) -> None:
-    """アプリケーションバナーを表示"""
-    logger.info(APP_TITLE)
-    logger.info("=" * BANNER_LENGTH)
-    logger.info(f"Remote WebDriver URL: {remote_url}")
-    logger.info(f"Browser: {browser}")
-    logger.info(f"Web UI: {remote_url}")
-    logger.info(f"VNC Viewer: {VNC_URL}")
-    logger.info("-" * SEPARATOR_LENGTH)
+async def get_last_published_timestamp(storage: PostgresStorage) -> datetime | None:
+    """データベースから前回取得した最新記事の公開日時を取得"""
+    try:
+        logger = get_app_logger(__name__)
+        logger.info("📅 Checking last published timestamp...")
+
+        last_published = await storage.get_latest_published_at()
+
+        if last_published:
+            logger.info(f"✅ Found previous latest article: {last_published}")
+        else:
+            logger.info("🆕 First run - no previous articles found")
+
+        return last_published
+    except Exception as e:
+        logger = get_app_logger(__name__)
+        logger.error(f"❌ Failed to get last published timestamp: {e}")
+        return None
 
 
-def main() -> None:
-    """メインエントリーポイント"""
+async def connect_to_database() -> PostgresStorage | None:
+    """PostgreSQLデータベースに接続"""
+    logger = get_app_logger(__name__)
+    logger.info("🔌 Connecting to database...")
+
+    try:
+        storage = PostgresStorage()
+        await storage.connect()
+        logger.info("✅ Database connected successfully")
+        return storage
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {e}")
+        return None
+
+
+async def scrape_and_save_new_articles() -> None:
+    """新規記事のスクレイピングと保存"""
+    logger = get_app_logger(__name__)
+    logger.info("🚀 Starting CryptoPanic news scraper...")
+
+    # データベース接続
+    storage = await connect_to_database()
+    last_published_at = None
+
+    if storage:
+        last_published_at = await get_last_published_timestamp(storage)
+
+    # News element取得とフィルタリング
+    with create_webdriver_from_env() as driver:
+        scraper = CryptoPanicScraper(driver)
+        filtered_elements = scraper.get_filtered_elements_by_date(last_published_at)
+
+        if not filtered_elements:
+            logger.info("⚡ No new articles found - process completed")
+            if storage:
+                await storage.close()
+            return
+
+        logger.info(f"📰 Found {len(filtered_elements)} new articles - starting scraping")
+        scraped_articles = scraper.scrape_filtered_articles(filtered_elements)
+
+    logger.info(f"📄 Scraped {len(scraped_articles)} articles")
+
+    # データベース保存
+    if storage and scraped_articles:
+        try:
+            logger.info(f"💾 Saving {len(scraped_articles)} articles to database...")
+            saved_count = await storage.save_data_sources(scraped_articles)
+
+            # 保存結果の詳細サマリー
+            if saved_count == len(scraped_articles):
+                logger.info(f"✅ Successfully saved all {saved_count} articles to database")
+            elif saved_count > 0:
+                skipped_count = len(scraped_articles) - saved_count
+                logger.warning(
+                    f"⚠️ Saved {saved_count}/{len(scraped_articles)} articles ({skipped_count} skipped due to duplicates/validation errors)"
+                )
+            else:
+                logger.warning(f"⚠️ No new articles saved (all {len(scraped_articles)} were duplicates or invalid)")
+
+        except Exception as e:
+            logger.error(f"❌ Database save failed: {e}")
+        finally:
+            await storage.close()
+    else:
+        if not storage:
+            logger.warning("⚠️ No database connection - articles not saved")
+        elif not scraped_articles:
+            logger.warning("⚠️ No articles to save")
+
+    logger.info("🎉 Process completed successfully")
+
+
+async def main():
+    """アプリケーションエントリーポイント"""
     logger = get_app_logger(__name__)
 
     try:
-        # 環境変数取得と環境検出
-        browser = os.getenv("SELENIUM_BROWSER", DEFAULT_BROWSER)
-
-        # 環境に応じたデフォルトURL選択
-        if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
-            default_url = "wss://chrome.browserless.io"  # Railway環境
-            logger.info("🚂 Running on Railway - Using external browser service")
-        elif os.getenv("DOCKER_CONTAINER"):
-            default_url = DEFAULT_REMOTE_URL_DOCKER  # Docker環境
-            logger.info("🐳 Running in Docker - Using Selenium Standalone")
-        else:
-            default_url = "http://localhost:4444"  # ローカル環境
-            logger.info("💻 Running locally - Using localhost Selenium")
-
-        remote_url = os.getenv("SELENIUM_REMOTE_URL", default_url)
-
-        # バナー表示
-        print_banner(logger, browser, remote_url)
-
-        # スクレイピング実行
-        logger.info(f"Starting Selenium Standalone test with {browser}...")
-
-        with create_scraper_from_env() as scraper:
-            # テストページスクレイピング（外部関数を使用）
-            result = scrape_test_page(scraper)
-
-            # スクリーンショット保存
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            screenshot_path = scraper.take_screenshot(f"test_screenshot_{timestamp}.png")
-
-            # 結果表示
-            logger.info("📊 Scraping Results:")
-            for key, value in result.items():
-                logger.info(f"  {key}: {value}")
-
-            logger.info(f"📸 Screenshot: {screenshot_path}")
-            logger.info("✅ Test completed successfully!")
+        await scrape_and_save_new_articles()
 
     except KeyboardInterrupt:
-        logger.warning("🛑 Operation cancelled by user")
-        sys.exit(1)
+        logger.info("⏹️ Process interrupted by user")
 
     except Exception as e:
-        logger.error(f"❌ Application failed: {e}")
-        logger.info("")
-        logger.info("🔧 Troubleshooting:")
-        logger.info("- Check if Selenium Standalone is running (docker-compose up)")
-        logger.info(f"- Verify server status at {remote_url}")
-        logger.info("- Check if the specified browser node is available")
-        logger.info("- Ensure proper network connectivity")
-
-        sys.exit(1)
+        logger.error(f"💥 Unexpected error occurred: {e}")
+        raise
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+
+    asyncio.run(main())

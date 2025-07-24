@@ -22,6 +22,8 @@ services:
     container_name: selenium-scraper-app
     depends_on:
       - selenium
+    env_file:
+      - .env  # .envファイルから環境変数を読み込み
     environment:
       - SELENIUM_REMOTE_URL=http://selenium:4444
       - SELENIUM_BROWSER=chrome  # or firefox

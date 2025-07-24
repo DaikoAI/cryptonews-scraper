@@ -1,10 +1,8 @@
-# Railway Configuration for Selenium Scraper
-# 10分間隔でスクレイピングを自動実行
+# Railway Configuration for CryptoPanic Scraper
+# 5分間隔でスクレイピングを自動実行（効率的な差分更新）
 
 [build]
-builder = "DOCKERFILE"
 
 [deploy]
-startCommand = "app"
-restartPolicyType = "NEVER"
-cronSchedule = "0 0 * * *"
+startCommand = "python src/main.py"
+cronSchedule = "*/5 * * * *"
