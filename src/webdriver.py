@@ -1,10 +1,8 @@
 """
-Selenium Standalone Chromium Scraper
+WebDriver Manager
 
-Remote WebDriver with Standalone Chromium を使用したウェブスクレイピング機能
+Remote WebDriver with Standalone Chromium を使用したWebDriver管理クラス
 """
-
-import os
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -13,49 +11,42 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from src.config import Config
 from src.constants import (
     CHROME_USER_AGENT,
     CHROME_WINDOW_SIZE,
     CONNECTION_FAILED_MSG,
     CONNECTION_SUCCESS_MSG,
     DEFAULT_BROWSER,
-    DEFAULT_REMOTE_URL_BROWSERLESS,
-    DEFAULT_REMOTE_URL_DOCKER,
-    DEFAULT_REMOTE_URL_LOCAL,
-    DEFAULT_SCREENSHOT_DIR,
     DEFAULT_TIMEOUT,
-    ENV_SELENIUM_BROWSER,
-    ENV_SELENIUM_REMOTE_URL,
     FIREFOX_WINDOW_HEIGHT,
     FIREFOX_WINDOW_WIDTH,
-    RAILWAY_ENVIRONMENT,
-    RAILWAY_PROJECT_ID,
-    SCREENSHOT_SAVED_MSG,
     SUPPORTED_BROWSERS,
-    TEST_URL,
     UNSUPPORTED_BROWSER_MSG,
     WEBDRIVER_NOT_CONNECTED_MSG,
 )
 from src.utils.logger import get_app_logger
 
 
-class StandaloneChromiumScraper:
-    """Selenium Standalone Chromium を使用したWebDriver管理クラス"""
+class WebDriverManager:
+    """WebDriver管理クラス - Selenium Remote WebDriverの統一インターフェース"""
 
-    def __init__(
-        self, browser: str = DEFAULT_BROWSER, remote_url: str = DEFAULT_REMOTE_URL_LOCAL, timeout: int = DEFAULT_TIMEOUT
-    ):
+    def __init__(self, browser: str = DEFAULT_BROWSER, remote_url: str | None = None, timeout: int = DEFAULT_TIMEOUT):
         """
         Args:
             browser: ブラウザタイプ (chrome/firefox)
-            remote_url: Selenium Standalone サーバーURL
+            remote_url: Selenium Standalone サーバーURL (Noneの場合は環境から自動選択)
             timeout: WebDriverタイムアウト (秒)
         """
         self.browser = browser.lower()
-        self.remote_url = remote_url
+        self.remote_url = remote_url or self._get_default_remote_url()
         self.timeout = timeout
         self.driver: webdriver.Remote | None = None
         self.logger = get_app_logger(__name__)
+
+    def _get_default_remote_url(self) -> str:
+        """環境に応じたデフォルトRemote URLを取得"""
+        return Config.get_selenium_remote_url()
 
     def _create_chrome_options(self) -> ChromeOptions:
         """Chrome用オプションを作成"""
@@ -63,6 +54,7 @@ class StandaloneChromiumScraper:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
+        options.add_argument("--headless")  # ヘッドレスモード追加
         options.add_argument(f"--window-size={CHROME_WINDOW_SIZE}")
         options.add_argument(f"--user-agent={CHROME_USER_AGENT}")
         return options
@@ -70,13 +62,14 @@ class StandaloneChromiumScraper:
     def _create_firefox_options(self) -> FirefoxOptions:
         """Firefox用オプションを作成"""
         options = FirefoxOptions()
+        options.add_argument("--headless")  # ヘッドレスモード追加
         options.add_argument(f"--width={FIREFOX_WINDOW_WIDTH}")
         options.add_argument(f"--height={FIREFOX_WINDOW_HEIGHT}")
         return options
 
     def connect(self) -> None:
         """Remote WebDriver に接続"""
-        self.logger.info(f"Connecting to Selenium Standalone {self.browser.title()}...")
+        self.logger.info(f"Connecting to Selenium {self.browser.title()}...")
 
         try:
             grid_url = f"{self.remote_url}/wd/hub"
@@ -108,7 +101,7 @@ class StandaloneChromiumScraper:
         if self.driver:
             try:
                 self.driver.quit()
-                self.logger.info("Remote WebDriver disconnected")
+                self.logger.info("WebDriver disconnected")
             except Exception as e:
                 self.logger.warning(f"Error during disconnect: {e}")
             finally:
@@ -123,15 +116,15 @@ class StandaloneChromiumScraper:
         """Context manager exit"""
         self.disconnect()
 
-    def get_page(self, url: str) -> None:
-        """指定URLのページを取得"""
+    def navigate_to(self, url: str) -> None:
+        """指定URLのページに移動"""
         if not self.driver:
             raise RuntimeError(WEBDRIVER_NOT_CONNECTED_MSG)
 
         self.logger.info(f"Navigating to: {url}")
         self.driver.get(url)
 
-    def wait_for_element(self, by: By, value: str, timeout: int = None) -> None:
+    def wait_for_element(self, by: By, value: str, timeout: int | None = None) -> None:
         """要素の出現を待機"""
         if not self.driver:
             raise RuntimeError(WEBDRIVER_NOT_CONNECTED_MSG)
@@ -153,100 +146,31 @@ class StandaloneChromiumScraper:
 
         return self.driver.find_elements(by, value)
 
-    def get_page_info(self) -> dict[str, str]:
-        """現在のページの基本情報を取得"""
+    @property
+    def page_source(self) -> str:
+        """現在のページソースを取得"""
         if not self.driver:
             raise RuntimeError(WEBDRIVER_NOT_CONNECTED_MSG)
+        return self.driver.page_source
 
-        # ブラウザ情報
-        browser_name = self.driver.capabilities.get("browserName", "unknown")
-        browser_version = self.driver.capabilities.get("browserVersion", "unknown")
-
-        return {
-            "title": self.driver.title,
-            "current_url": self.driver.current_url,
-            "page_source_length": str(len(self.driver.page_source)),
-            "browser_name": browser_name,
-            "browser_version": browser_version,
-        }
-
-    def take_screenshot(self, filename: str = "screenshot.png", directory: str = DEFAULT_SCREENSHOT_DIR) -> str:
-        """スクリーンショットを保存"""
+    @property
+    def current_url(self) -> str:
+        """現在のURLを取得"""
         if not self.driver:
             raise RuntimeError(WEBDRIVER_NOT_CONNECTED_MSG)
+        return self.driver.current_url
 
-        # ディレクトリ作成
-        os.makedirs(directory, exist_ok=True)
-
-        filepath = os.path.join(directory, filename)
-
-        try:
-            self.driver.save_screenshot(filepath)
-            self.logger.info(SCREENSHOT_SAVED_MSG.format(filepath))
-            return filepath
-        except Exception as e:
-            self.logger.error(f"Failed to save screenshot: {e}")
-            raise
+    @property
+    def title(self) -> str:
+        """現在のページタイトルを取得"""
+        if not self.driver:
+            raise RuntimeError(WEBDRIVER_NOT_CONNECTED_MSG)
+        return self.driver.title
 
 
-def scrape_test_page(scraper: StandaloneChromiumScraper) -> dict[str, str]:
-    """テストページをスクレイピング（クラス外関数）"""
-    logger = get_app_logger(__name__)
-
-    try:
-        # テストページに移動
-        scraper.get_page(TEST_URL)
-
-        # ページロード待機
-        scraper.wait_for_element(By.TAG_NAME, "h1")
-
-        # 基本ページ情報取得
-        page_info = scraper.get_page_info()
-
-        # H1テキスト取得
-        try:
-            h1_element = scraper.find_element(By.TAG_NAME, "h1")
-            h1_text = h1_element.text
-        except Exception:
-            h1_text = "N/A"
-
-        # 結果をまとめる
-        result = {
-            "status": "success",
-            "title": page_info["title"],
-            "h1_text": h1_text,
-            "page_source_length": page_info["page_source_length"],
-            "url": page_info["current_url"],
-            "browser_name": page_info["browser_name"],
-            "browser_version": page_info["browser_version"],
-            "execution_mode": "selenium_standalone_chromium",
-        }
-
-        logger.info("Test page scraped successfully")
-        logger.debug(f"Scraping result: {result}")
-
-        return result
-
-    except Exception as e:
-        logger.error(f"Scraping failed: {e}")
-        raise
-
-
-def create_scraper_from_env() -> StandaloneChromiumScraper:
-    """環境変数からスクレイパーを作成"""
-    browser = os.getenv(ENV_SELENIUM_BROWSER, DEFAULT_BROWSER)
-
-    # Railway環境の検出と適切なデフォルトURL選択
-    if os.getenv(RAILWAY_ENVIRONMENT) or os.getenv(RAILWAY_PROJECT_ID):
-        # Railway環境: Browserless.ioまたは外部サービスを使用
-        default_url = DEFAULT_REMOTE_URL_BROWSERLESS
-    elif os.getenv("DOCKER_CONTAINER"):
-        # Docker環境: selenium サービスを使用
-        default_url = DEFAULT_REMOTE_URL_DOCKER
-    else:
-        # ローカル環境: localhost を使用
-        default_url = DEFAULT_REMOTE_URL_LOCAL
-
-    remote_url = os.getenv(ENV_SELENIUM_REMOTE_URL, default_url)
-
-    return StandaloneChromiumScraper(browser=browser, remote_url=remote_url)
+def create_webdriver_from_env() -> WebDriverManager:
+    """環境変数からWebDriverを作成"""
+    return WebDriverManager(
+        browser=Config.SELENIUM_BROWSER,
+        remote_url=Config.SELENIUM_REMOTE_URL,
+    )

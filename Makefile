@@ -56,26 +56,27 @@ install:
 dev:
 	uv sync --group dev
 
-# Code formatting and linting
-.PHONY: format
+# コード品質チェック
+check:
+	uv run ruff check .
+	uv run ruff format --check .
+
+# コードフォーマット（自動修正）
 format:
-	uv run ruff format src/
+	uv run ruff check --fix .
+	uv run ruff format .
 
-.PHONY: lint
+# リント実行
 lint:
-	uv run ruff check src/
+	uv run ruff check .
 
-.PHONY: lint-fix
-lint-fix:
-	uv run ruff check --fix src/
-
-.PHONY: check
-check: lint format
-
-# Testing
-.PHONY: test
+# テスト実行
 test:
-	uv run python -m pytest
+	uv run pytest tests/ -v
+
+# アプリケーション実行
+run:
+	uv run python src/main.py
 
 # Selenium Grid management
 .PHONY: grid-up
@@ -103,18 +104,6 @@ grid-status:
 	@curl -s http://localhost:4444/status | jq . || echo "Grid not available or jq not installed"
 	@echo ""
 	@echo "📊 Grid Console: http://localhost:4444"
-
-# Run application
-.PHONY: run
-run:
-	@echo "🔍 Checking if Selenium Grid is running..."
-	@if ! curl -s http://localhost:4444/status > /dev/null 2>&1; then \
-		echo "❌ Selenium Grid is not running"; \
-		echo "💡 Start it with: make grid-up"; \
-		exit 1; \
-	fi
-	@echo "✅ Grid is running!"
-	uv run python src/main.py
 
 # Scraping commands
 .PHONY: scrape
@@ -170,10 +159,9 @@ docker-down:
 railway-deploy:
 	railway up
 
-# Cleanup
-.PHONY: clean
-clean: clean-python clean-docker
-	@echo "🧹 Complete cleanup finished!"
+# レポートファイルクリーンアップ
+clean:
+	rm -rf reports/*.json
 
 .PHONY: clean-python
 clean-python:

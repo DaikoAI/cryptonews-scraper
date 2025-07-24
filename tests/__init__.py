@@ -1,0 +1,5 @@
+"""
+Tests Package
+
+CryptoPanic Scraperのテストスイート
+"""
