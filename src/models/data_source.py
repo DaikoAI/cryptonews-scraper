@@ -43,7 +43,28 @@ class DataSource:
 
     def is_valid(self) -> bool:
         """基本的なバリデーション"""
-        return bool(self.url and self.summary and len(self.summary.strip()) > 0)
+        # URL の基本チェック
+        if not self.url or not isinstance(self.url, str) or len(self.url.strip()) == 0:
+            return False
+
+        # URLが有効な形式かチェック
+        url_stripped = self.url.strip()
+        if not (url_stripped.startswith("http://") or url_stripped.startswith("https://")):
+            return False
+
+        # summary (タイトル) の基本チェック
+        if not self.summary or not isinstance(self.summary, str) or len(self.summary.strip()) < 3:
+            return False
+
+        # typeの基本チェック
+        if not self.type or not isinstance(self.type, str):
+            return False
+
+        # idの基本チェック
+        if not self.id or not isinstance(self.id, str):
+            return False
+
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         """辞書形式に変換"""

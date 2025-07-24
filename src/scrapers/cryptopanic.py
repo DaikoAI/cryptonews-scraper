@@ -1,7 +1,7 @@
 """
-CryptoPanic専用スクレイパー - 100%成功率を目指す堅牢版
+CryptoPanic News Scraper
 
-docs/target.htmlの構造に最適化されたスクレイピング実装
+CryptoPanicサイトからニュース記事をスクレイピングするクラス
 """
 
 import re
@@ -16,9 +16,15 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from src.config import Config
 from src.models import DataSource
 from src.scrapers.base import BaseScraper
-from src.utils.scraping_utils import ElementSearcher, TabManager, TextCleaner, WebDriverUtils
+from src.utils.scraping_utils import (
+    ElementSearcher,
+    TabManager,
+    TextCleaner,
+    WebDriverUtils,
+)
 
 
 class CryptoPanicScraper(BaseScraper):
@@ -30,9 +36,12 @@ class CryptoPanicScraper(BaseScraper):
         super().__init__(driver)
         self.tab_manager = TabManager(driver.driver, self.logger)
 
+        # URL設定
+        self.url = f"{self.BASE_URL}/"
+
         # 並列処理設定
-        self.max_workers = 2  # 並列スレッド数
-        self.batch_size = 3  # バッチサイズ（さらに小さく）
+        self.max_workers = Config.SCRAPING_MAX_WORKERS
+        self.batch_size = Config.SCRAPING_BATCH_SIZE
         self.driver_lock = threading.Lock()  # WebDriver操作のロック
 
         self.logger.info(f"🚀 Parallel processing: {self.max_workers} workers, batch size: {self.batch_size}")
@@ -41,37 +50,113 @@ class CryptoPanicScraper(BaseScraper):
         return "cryptopanic"
 
     def get_base_url(self) -> str:
-        return f"{self.BASE_URL}/"
+        """ベースURLを取得"""
+        return self.url
 
     def scrape_articles(self) -> list[DataSource]:
-        """記事をスクレイピング - スクロール対応版"""
-        try:
-            # 画面サイズを大きく設定
-            self.driver.driver.set_window_size(1920, 1080)
-            self.logger.info("Set browser window size to 1920x1080")
+        """全記事をスクレイピング（BaseScraper用）"""
+        # フィルタリングなしで全記事を取得
+        all_elements = self.get_filtered_elements_by_date(None)
+        return self.scrape_filtered_articles(all_elements)
 
-            self._wait_for_page_load()
+    def get_filtered_elements_by_date(self, last_published_at: datetime | None) -> list:
+        """日時フィルタリング済みのelementリストを取得"""
+        self.logger.info("🔍 Loading news page and filtering articles...")
 
-            # ページを最下部までスクロールして全要素をロード
-            self._scroll_to_load_all_elements()
+        # ページ読み込み
+        self.driver.driver.get(self.url)
+        self.driver.driver.set_window_size(1920, 1080)
 
-            # 記事要素を取得
-            elements = self._get_article_elements()
-            if not elements:
-                self.logger.warning("No article elements found")
-                return []
+        # 全要素の取得
+        self._scroll_to_load_all_elements()
+        all_elements = self._get_article_elements()
 
-            self.logger.info(f"Found {len(elements)} article elements")
-            return self._process_article_elements(elements)
+        # 日時でフィルタリング
+        filtered_elements = self._filter_elements_by_published_date(all_elements, last_published_at)
 
-        except Exception as e:
-            self.logger.error(f"Failed to scrape articles: {e}")
+        self.logger.info(f"📊 Found {len(filtered_elements)}/{len(all_elements)} new articles")
+
+        return filtered_elements
+
+    def _filter_elements_by_published_date(self, elements: list, last_published_at: datetime | None) -> list:
+        """elementを公開日時でフィルタリング"""
+        if not last_published_at:
+            self.logger.info("No last_published_at provided, returning all elements")
+            return elements
+
+        self.logger.info(f"🕰️ Filtering articles newer than: {last_published_at}")
+
+        filtered_elements = []
+        same_count = 0
+        older_count = 0
+        newer_count = 0
+        invalid_count = 0
+
+        for i, element in enumerate(elements):
+            try:
+                published_at = self._extract_published_at(element)
+
+                # デバッグ情報（最初の5個のみ）
+                if i < 5:
+                    title_preview = self._extract_title_from_element(element)
+                    title_preview = (
+                        title_preview[:30] + "..." if title_preview and len(title_preview) > 30 else title_preview
+                    )
+                    self.logger.debug(f"Element {i + 1}: '{title_preview}' -> published_at={published_at}")
+
+                # 時間情報が取得できない記事は新しい記事として扱う（安全サイド）
+                if not published_at:
+                    filtered_elements.append(element)
+                    invalid_count += 1
+                    if i < 5:
+                        self.logger.debug(f"Element {i + 1}: No published_at, treating as new article")
+                elif published_at > last_published_at:
+                    filtered_elements.append(element)
+                    newer_count += 1
+                elif published_at == last_published_at:
+                    same_count += 1
+                    if i < 5:
+                        self.logger.debug(f"Element {i + 1}: Same time as last article, skipping")
+                else:
+                    older_count += 1
+                    if i < 5:
+                        self.logger.debug(f"Element {i + 1}: Older than last article, skipping")
+
+            except Exception as e:
+                # エラーの場合も新しい記事として扱う（安全サイド）
+                filtered_elements.append(element)
+                invalid_count += 1
+                self.logger.debug(f"Failed to parse date for element {i + 1}: {e}, treating as new article")
+                continue
+
+        self.logger.info(
+            f"📊 Filtering results: {newer_count} newer, {same_count} same, {older_count} older, {invalid_count} no-time (treated as new)"
+        )
+
+        # 新しい順にソート（タイムゾーン問題を解決）
+        filtered_elements.sort(
+            key=lambda x: self._extract_published_at(x) or datetime.min.replace(tzinfo=UTC), reverse=True
+        )
+
+        return filtered_elements
+
+    def scrape_filtered_articles(self, filtered_elements: list) -> list[DataSource]:
+        """フィルタリング済みのelementのみをスクレイピング"""
+        if not filtered_elements:
             return []
+
+        self.logger.info(f"🔄 Scraping {len(filtered_elements)} articles...")
+
+        result = self._process_article_elements(filtered_elements)
+
+        self.logger.info(f"✅ Successfully scraped {len(result)} articles")
+
+        return result
 
     def _scroll_to_load_all_elements(self) -> None:
         """ページを最下部までスクロールして全要素をロード"""
         try:
-            self.logger.info("🔄 Scrolling to load all elements...")
+            self.logger.info("   🔄 Scrolling to load all elements...")
 
             last_height = self.driver.driver.execute_script("return document.body.scrollHeight")
             scroll_attempts = 0
@@ -91,150 +176,140 @@ class CryptoPanicScraper(BaseScraper):
 
                 last_height = new_height
                 scroll_attempts += 1
-                self.logger.info(f"Scrolled {scroll_attempts}/{max_attempts}, height: {new_height}")
+                self.logger.debug(f"   📏 Scroll attempt {scroll_attempts}/{max_attempts}, height: {new_height}")
 
             # 最後にページトップに戻る
             self.driver.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
 
-            self.logger.info(f"✅ Scroll completed after {scroll_attempts} attempts")
+            self.logger.info(f"   ✅ Scrolling completed after {scroll_attempts} attempts")
 
         except Exception as e:
-            self.logger.warning(f"Scroll failed: {e}")
-
-    def _scroll_element_into_view(self, element) -> bool:
-        """要素を画面内に表示"""
-        try:
-            # 要素までスクロール
-            self.driver.driver.execute_script(
-                "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element
-            )
-            time.sleep(0.3)  # スクロール完了を待機
-
-            # 要素が可視かチェック
-            is_visible = self.driver.driver.execute_script(
-                """
-                var rect = arguments[0].getBoundingClientRect();
-                return (rect.top >= 0 && rect.left >= 0 &&
-                        rect.bottom <= window.innerHeight &&
-                        rect.right <= window.innerWidth);
-            """,
-                element,
-            )
-
-            if is_visible:
-                self.logger.debug("✅ Element is now visible")
-                return True
-            else:
-                self.logger.debug("⚠️ Element scrolled but still not fully visible")
-                return False
-
-        except Exception as e:
-            self.logger.debug(f"❌ Scroll element error: {e}")
-            return False
+            self.logger.warning(f"   ⚠️ Scrolling failed: {e}")
 
     def _process_article_elements(self, elements: list) -> list[DataSource]:
-        """記事要素を軽量並列処理 - エラー対策版"""
-        initial_element_count = len(elements)
+        """記事要素を並列処理でスクレイピング"""
+        if not elements:
+            return []
+
+        max_workers = self.max_workers
+        batch_size = self.batch_size
+
         data_sources = []
-        successful = 0
-        failed = 0
+        total_count = len(elements)
 
-        self.logger.info(f"🚀 Processing {initial_element_count} articles with light parallelism...")
-
-        # 小さなバッチで安全に並列処理
-        batch_size = 3  # 小さなバッチサイズ
-        max_workers = 2  # 最小限の並列度
-
-        for batch_start in range(0, initial_element_count, batch_size):
-            batch_end = min(batch_start + batch_size, initial_element_count)
-            batch_indices = list(range(batch_start, batch_end))
-
-            self.logger.info(f"🔄 Processing batch: articles {batch_start + 1}-{batch_end}")
-
-            # バッチを軽量並列処理
-            batch_results = self._process_batch_safe(batch_indices, max_workers)
+        # バッチ処理
+        for i in range(0, total_count, batch_size):
+            batch_elements = elements[i : i + batch_size]
+            batch_results = self._process_elements_batch(batch_elements, max_workers)
 
             # 結果をマージ
             for result in batch_results:
                 if result["success"] and result["data_source"]:
                     data_sources.append(result["data_source"])
-                    successful += 1
-                    self.logger.info(f"[{result['index'] + 1}] ✅ {result['data_source'].summary[:50]}...")
-                else:
-                    failed += 1
-                    self.logger.info(f"[{result['index'] + 1}] ❌ Failed: {result.get('error', 'Unknown')}")
 
-        self.logger.info(f"🎯 Final results: {successful} successful, {failed} failed out of {initial_element_count}")
         return data_sources
 
-    def _process_batch_safe(self, batch_indices: list[int], max_workers: int) -> list[dict]:
-        """安全なバッチ並列処理"""
+    def _process_elements_batch(self, elements: list, max_workers: int) -> list[dict]:
+        """要素のバッチを並列処理"""
         results = []
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 各記事を並列で処理
-            future_to_index = {executor.submit(self._process_single_article_safe, i): i for i in batch_indices}
+            # 各elementを並列で処理
+            future_to_element = {
+                executor.submit(self._process_single_element, element): element for element in elements
+            }
 
             # 完了順に結果を収集
-            for future in as_completed(future_to_index):
-                index = future_to_index[future]
+            for future in as_completed(future_to_element):
                 try:
                     result = future.result()
-                    result["index"] = index
                     results.append(result)
                 except Exception as e:
-                    self.logger.warning(f"Article {index + 1} processing failed: {e}")
-                    results.append({"index": index, "success": False, "data_source": None, "error": str(e)})
+                    self.logger.warning(f"Element processing failed: {e}")
+                    results.append({"success": False, "data_source": None, "error": str(e)})
 
-        # インデックス順にソート
-        results.sort(key=lambda x: x["index"])
         return results
 
-    def _process_single_article_safe(self, index: int) -> dict:
-        """単一記事を安全に処理（WebDriver競合回避版）- タブ無効版"""
+    def _process_single_element(self, element) -> dict:
+        """単一elementを安全に処理"""
         try:
             # WebDriverアクセスは慎重にロック
             with self.driver_lock:
-                element = self._get_element_by_index(index)
-                if not element:
-                    return {"success": False, "data_source": None, "error": "Element not found"}
-
                 # 基本チェック
                 try:
-                    element.tag_name  # stale check
+                    _ = element.tag_name  # stale check
                     if not element.is_displayed():
-                        return {"success": False, "data_source": None, "error": "Element not displayed"}
+                        return {
+                            "success": False,
+                            "data_source": None,
+                            "error": "Element not displayed",
+                        }
                 except Exception as e:
-                    return {"success": False, "data_source": None, "error": f"Element stale: {e}"}
+                    return {
+                        "success": False,
+                        "data_source": None,
+                        "error": f"Element stale: {e}",
+                    }
 
-                # タイトルとCryptoPanic URLを取得（タブ操作なし）
+                # タイトルとCryptoPanic URLを取得
                 title = self._extract_title_from_element(element)
                 cryptopanic_url = self._extract_cryptopanic_url(element)
 
                 if not title or not cryptopanic_url:
-                    return {'success': False, 'data_source': None, 'error': 'Title or URL not found'}
+                    return {
+                        "success": False,
+                        "data_source": None,
+                        "error": "Title or URL not found",
+                    }
 
-                # 外部URL抽出を試行（安全版）
+                # 外部URL抽出を試行
                 final_url = self._extract_external_url_safe(element, cryptopanic_url)
 
                 # DataSource作成
                 try:
                     published_at = self._extract_published_at(element)
+
+                    # 入力データの前処理バリデーション
+                    if not title or len(title.strip()) < 3:
+                        return {
+                            "success": False,
+                            "data_source": None,
+                            "error": f"Invalid title: '{title}'",
+                        }
+
+                    if not final_url or not (final_url.startswith("http://") or final_url.startswith("https://")):
+                        return {
+                            "success": False,
+                            "data_source": None,
+                            "error": f"Invalid URL: '{final_url}'",
+                        }
+
                     data_source = DataSource.from_cryptopanic_news(
-                        title=title,
-                        url=final_url,  # 外部URLまたはCryptoPanic URL
+                        title=title.strip(),
+                        url=final_url.strip(),
                         published_at=published_at,
-                        scraped_at=datetime.now(UTC)
+                        scraped_at=datetime.now(UTC),
                     )
                 except Exception as e:
-                    return {'success': False, 'data_source': None, 'error': f'DataSource creation failed: {e}'}
+                    return {
+                        "success": False,
+                        "data_source": None,
+                        "error": f"DataSource creation failed: {e}",
+                    }
 
             # ロック外で検証
             if data_source and data_source.is_valid():
                 return {"success": True, "data_source": data_source, "error": None}
             else:
-                return {"success": False, "data_source": None, "error": "Invalid data source"}
+                error_msg = "Invalid data source"
+                if data_source:
+                    error_msg += f" - URL: '{data_source.url}', Title: '{data_source.summary}'"
+                return {
+                    "success": False,
+                    "data_source": None,
+                    "error": error_msg,
+                }
 
         except Exception as e:
             return {"success": False, "data_source": None, "error": str(e)}
@@ -290,8 +365,9 @@ class CryptoPanicScraper(BaseScraper):
                             return cleaned_text
 
             return None
+
         except Exception as e:
-            self.logger.debug(f"Title extraction error: {e}")
+            self.logger.debug(f"Title extraction failed: {e}")
             return None
 
     def _extract_cryptopanic_url(self, element) -> str | None:
@@ -318,94 +394,170 @@ class CryptoPanicScraper(BaseScraper):
                 datetime_attr = ElementSearcher.safe_get_attribute(time_elem, "datetime")
                 if datetime_attr:
                     try:
-                        from dateutil import parser
+                        # CryptoPanic特有の形式を処理
+                        parsed_dt = self._parse_cryptopanic_datetime(datetime_attr)
+                        if parsed_dt:
+                            self.logger.debug(f"Parsed datetime from attribute: {parsed_dt}")
+                            return parsed_dt
+                    except Exception as e:
+                        self.logger.debug(f"Failed to parse datetime attribute '{datetime_attr}': {e}")
 
-                        return parser.parse(datetime_attr)
-                    except Exception:
-                        pass
-
-                # テキストから時間を抽出
+                # テキストから相対時間を抽出・計算
                 time_text = ElementSearcher.safe_get_text(time_elem)
-                if time_text and any(
-                    indicator in time_text.lower() for indicator in ["h", "min", "hour", "day", "ago"]
-                ):
-                    # 相対時間の場合は現在時刻を返す
-                    return datetime.now(UTC)
+                if time_text:
+                    relative_time = self._parse_relative_time(time_text)
+                    if relative_time:
+                        self.logger.debug(f"Parsed relative time '{time_text}' -> {relative_time}")
+                        return relative_time
 
-            # デフォルトは現在時刻
-            return datetime.now(UTC)
+            # 時間情報が見つからない場合はNoneを返す（フィルタリングされない）
+            self.logger.debug("No valid time information found")
+            return None
 
         except Exception as e:
             self.logger.debug(f"Failed to extract published_at: {e}")
-            return datetime.now(UTC)
+            return None
+
+    def _parse_cryptopanic_datetime(self, datetime_str: str) -> datetime | None:
+        """CryptoPanic特有のdatetime形式を解析"""
+        try:
+            import re
+
+            # 形式: "Thu Jul 24 2025 19:27:23 GMT+0000 (Coordinated Universal Time)"
+            # 正規表現でdate/time部分を抽出
+            pattern = r"(\w+)\s+(\w+)\s+(\d+)\s+(\d+)\s+(\d+):(\d+):(\d+)\s+GMT([+-]\d{4})"
+            match = re.match(pattern, datetime_str)
+
+            if not match:
+                # dateutilで試行
+                try:
+                    from dateutil import parser
+
+                    # GMT部分以降を除去して解析
+                    cleaned = re.sub(r"\s+GMT.*$", "", datetime_str)
+                    return parser.parse(cleaned).replace(tzinfo=UTC)
+                except Exception:
+                    pass
+                return None
+
+            # マッチした場合、構造化して解析
+            day_name, month_name, day, year, hour, minute, second, tz_offset = match.groups()
+
+            # 月名を数値に変換
+            month_map = {
+                "Jan": 1,
+                "Feb": 2,
+                "Mar": 3,
+                "Apr": 4,
+                "May": 5,
+                "Jun": 6,
+                "Jul": 7,
+                "Aug": 8,
+                "Sep": 9,
+                "Oct": 10,
+                "Nov": 11,
+                "Dec": 12,
+            }
+            month_num = month_map.get(month_name, 1)
+
+            # datetimeオブジェクトを作成
+            dt = datetime(int(year), month_num, int(day), int(hour), int(minute), int(second), tzinfo=UTC)
+
+            return dt
+
+        except Exception as e:
+            self.logger.debug(f"Failed to parse CryptoPanic datetime '{datetime_str}': {e}")
+            return None
+
+    def _parse_relative_time(self, time_text: str) -> datetime | None:
+        """相対時間テキストを実際のdatetimeに変換"""
+        try:
+            import re
+            from datetime import timedelta
+
+            text = time_text.lower().strip()
+            now = datetime.now(UTC)
+
+            # 分前 (5min, 10min ago, 30 minutes ago)
+            min_match = re.search(r"(\d+)\s*(?:min|minute)s?(?:\s+ago)?", text)
+            if min_match:
+                minutes = int(min_match.group(1))
+                return now - timedelta(minutes=minutes)
+
+            # 時間前 (2h, 5h ago, 3 hours ago)
+            hour_match = re.search(r"(\d+)\s*(?:h|hour)s?(?:\s+ago)?", text)
+            if hour_match:
+                hours = int(hour_match.group(1))
+                return now - timedelta(hours=hours)
+
+            # 日前 (1d, 2 days ago)
+            day_match = re.search(r"(\d+)\s*(?:d|day)s?(?:\s+ago)?", text)
+            if day_match:
+                days = int(day_match.group(1))
+                return now - timedelta(days=days)
+
+            # "ago"が含まれる場合は相対時間として扱うが、具体的な数値がない場合は1時間前とする
+            if "ago" in text:
+                self.logger.debug(f"Relative time text '{text}' detected but no specific time found, assuming 1h ago")
+                return now - timedelta(hours=1)
+
+            return None
+
+        except Exception as e:
+            self.logger.debug(f"Failed to parse relative time '{time_text}': {e}")
+            return None
 
     def _extract_external_url_safe(self, element, fallback_url: str) -> str:
-        """安全な外部URL抽出（タブ操作最小化版）"""
+        """安全な外部URL抽出（改良版）"""
         try:
             # Press記事は外部URL抽出をスキップ
             if WebDriverUtils.is_press_article(element):
                 self.logger.debug("Press article detected, using CryptoPanic URL")
                 return fallback_url
 
-            # 外部リンクアイコンを探す
-            try:
-                link_icon = element.find_element(By.CSS_SELECTOR, ".open-link-icon, .si-external-link")
-            except Exception:
-                self.logger.debug("No external link icon found, using CryptoPanic URL")
+            # まず、データ属性から直接取得を試行
+            direct_url = self._extract_url_from_attributes(element)
+            if direct_url:
+                self.logger.debug(f"✅ Direct URL found: {direct_url}")
+                return direct_url
+
+            # 外部リンクアイコンを探す（より多くのパターンを試行）
+            link_icon = None
+            icon_selectors = [
+                ".open-link-icon",
+                ".si-external-link",
+                ".external-link",
+                "a[title*='external']",
+                "a[aria-label*='external']",
+                ".link-icon",
+                "[data-testid*='external']",
+            ]
+
+            for selector in icon_selectors:
+                try:
+                    link_icon = element.find_element(By.CSS_SELECTOR, selector)
+                    self.logger.debug(f"✅ Found external link icon with selector: {selector}")
+                    break
+                except Exception:
+                    continue
+
+            if not link_icon:
+                self.logger.debug("❌ No external link icon found with any selector, using CryptoPanic URL")
                 return fallback_url
 
-            # タブ操作で外部URL取得（最小限）
-            external_url = self.tab_manager.click_and_get_url(link_icon, timeout=3)
+            # タブ操作で外部URL取得（タイムアウト延長）
+            external_url = self.tab_manager.click_and_get_url(link_icon, timeout=8)
 
             if external_url and self._is_valid_external_url(external_url):
-                self.logger.debug(f"External URL extracted: {external_url}")
+                self.logger.debug(f"✅ External URL extracted via tab: {external_url}")
                 return external_url
             else:
-                self.logger.debug("External URL extraction failed, using CryptoPanic URL")
+                self.logger.debug(f"❌ External URL extraction failed (url={external_url}), using CryptoPanic URL")
                 return fallback_url
 
         except Exception as e:
-            self.logger.debug(f"External URL extraction error: {e}, using fallback")
+            self.logger.debug(f"❌ External URL extraction error: {e}, using fallback")
             return fallback_url
-
-    def _get_current_article_count(self) -> int:
-        """現在のページの記事数を取得"""
-        try:
-            current_elements = self.driver.find_elements(By.CSS_SELECTOR, ".news-row")
-
-            # 有効な記事のみカウント
-            valid_count = 0
-            for el in current_elements:
-                if ElementSearcher.safe_find_elements(el, ".nc-title, a[href*='/news/']"):
-                    valid_count += 1
-
-            return valid_count
-        except Exception:
-            return 0
-
-    def _get_element_by_index(self, index: int) -> any:
-        """インデックスによる要素の動的再取得 - 範囲チェック強化"""
-        try:
-            # 現在のページ状態で要素を再取得
-            current_elements = self.driver.find_elements(By.CSS_SELECTOR, ".news-row")
-
-            # 有効な記事のみフィルタリング（元の処理と同じ）
-            filtered_elements = []
-            for el in current_elements:
-                if ElementSearcher.safe_find_elements(el, ".nc-title, a[href*='/news/']"):
-                    filtered_elements.append(el)
-
-            if index < len(filtered_elements):
-                element = filtered_elements[index]
-                self.logger.info(f"✅ Element {index + 1} re-fetched successfully")
-                return element
-            else:
-                self.logger.warning(f"❌ Element {index + 1} out of range (current: {len(filtered_elements)})")
-                return None
-
-        except Exception as e:
-            self.logger.warning(f"❌ Failed to re-fetch element {index + 1}: {e}")
-            return None
 
     def _extract_original_url_robust(self, element) -> str | None:
         """外部URL取得 - シンプル版"""
@@ -429,7 +581,13 @@ class CryptoPanicScraper(BaseScraper):
         """データ属性から直接URL取得 - 改良版"""
         try:
             # Method 1: data属性から取得
-            data_attrs = ["data-url", "data-href", "data-link", "data-external-url", "data-original-url"]
+            data_attrs = [
+                "data-url",
+                "data-href",
+                "data-link",
+                "data-external-url",
+                "data-original-url",
+            ]
             for attr in data_attrs:
                 url = ElementSearcher.safe_get_attribute(element, attr)
                 if self._is_valid_external_url(url):
@@ -459,7 +617,15 @@ class CryptoPanicScraper(BaseScraper):
                 # より寛容な条件
                 if href and href.startswith("http") and not href.startswith(self.BASE_URL):
                     # 広告やリダイレクトでない場合
-                    if not any(skip in href for skip in ["/redirect/", "javascript:", "#", "cryptopanic.com"]):
+                    if not any(
+                        skip in href
+                        for skip in [
+                            "/redirect/",
+                            "javascript:",
+                            "#",
+                            "cryptopanic.com",
+                        ]
+                    ):
                         self.logger.debug(f"🔍 Hidden external link: {href}")
                         return href
 
@@ -567,9 +733,9 @@ class CryptoPanicScraper(BaseScraper):
         try:
             # 直接的なテキスト取得
             direct_text = ElementSearcher.safe_get_text(title_element)
-            if direct_text and len(direct_text.strip()) > 3:  # より寛容に
+            if direct_text and len(direct_text.strip()) > 3:
                 cleaned_text = TextCleaner.extract_valid_line(direct_text)
-                if cleaned_text and len(cleaned_text) > 3:  # より寛容に
+                if cleaned_text and len(cleaned_text) > 3:
                     self.logger.debug(f"✅ Direct title text: {cleaned_text[:30]}...")
                     return cleaned_text
                 else:
@@ -599,17 +765,22 @@ class CryptoPanicScraper(BaseScraper):
                         self.logger.debug(f"✅ Span title text: {cleaned_text[:30]}...")
                         return cleaned_text
 
-            # 最後の手段：すべてのテキストノードを取得
+            # 最後の手段：より寛容な検証でテキストを取得
             all_text = ElementSearcher.safe_get_text(title_element)
             if all_text:
                 # 複数行に分かれている場合の処理
                 lines = [line.strip() for line in all_text.split("\n") if line.strip()]
                 for line in lines:
-                    if len(line) > 10 and not self._is_likely_domain_or_source(line):
+                    if len(line) > 5 and not self._is_likely_domain_or_source(line):
+                        # 通常の検証が失敗した場合、より寛容な検証を試行
                         cleaned_text = TextCleaner.extract_valid_line(line)
                         if cleaned_text:
                             self.logger.debug(f"✅ Fallback title text: {cleaned_text[:30]}...")
                             return cleaned_text
+                        # 基本的な検証のみでタイトルを許可
+                        elif self._is_basic_valid_title(line):
+                            self.logger.debug(f"✅ Basic valid title text: {line[:30]}...")
+                            return line
 
             self.logger.debug("❌ No valid title text found")
             return None
@@ -618,6 +789,27 @@ class CryptoPanicScraper(BaseScraper):
             self.logger.debug(f"❌ Title text extraction error: {e}")
             return None
 
+    def _is_basic_valid_title(self, text: str) -> bool:
+        """基本的なタイトル検証（より寛容）"""
+        if not text or len(text.strip()) < 5:
+            return False
+
+        text = text.strip()
+
+        # 明らかに無効なパターンのみ除外
+        if text.isdigit():
+            return False
+
+        # 時間表示のみの場合は除外
+        if len(text) < 10 and any(indicator in text.lower() for indicator in ["min", "h", "ago", "hour"]):
+            return False
+
+        # ドメイン名のみの場合は除外
+        if len(text) < 20 and any(domain in text.lower() for domain in [".com", ".org", ".io"]):
+            return False
+
+        return True
+
     def _is_likely_domain_or_source(self, text: str) -> bool:
         """ドメイン名やソース名らしいテキストを判定"""
         text_lower = text.lower()
@@ -625,7 +817,15 @@ class CryptoPanicScraper(BaseScraper):
         if "." in text and len(text) < 30:
             return True
         # 一般的なソース名パターン
-        source_indicators = ["coinpedia", "cointelegraph", "crypto", "bitcoin", ".com", ".org", ".io"]
+        source_indicators = [
+            "coinpedia",
+            "cointelegraph",
+            "crypto",
+            "bitcoin",
+            ".com",
+            ".org",
+            ".io",
+        ]
         return any(indicator in text_lower for indicator in source_indicators)
 
     def _extract_title_text_robust(self, element) -> str | None:

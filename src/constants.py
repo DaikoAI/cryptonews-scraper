@@ -46,6 +46,18 @@ FIREFOX_WINDOW_WIDTH = "1920"
 FIREFOX_WINDOW_HEIGHT = "1080"
 
 # ========================================
+# Scraping Configuration
+# ========================================
+
+# 並列処理設定（環境変数: SCRAPING_MAX_WORKERS）
+# 推奨値: 1-4（CPU使用量とメモリ使用量のバランス）
+DEFAULT_SCRAPING_MAX_WORKERS = 2
+
+# バッチサイズ設定（環境変数: SCRAPING_BATCH_SIZE）
+# 推奨値: 2-5（小さいほど安定、大きいほど高速）
+DEFAULT_SCRAPING_BATCH_SIZE = 5
+
+# ========================================
 # File and Directory Paths
 # ========================================
 

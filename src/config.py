@@ -2,9 +2,19 @@
 Configuration Module
 
 Railway環境での安全な環境変数読み込み
+
+スクレイピング設定（環境変数で変更可能）:
+- SCRAPING_MAX_WORKERS: 並列スレッド数（デフォルト: 2, 推奨: 1-4）
+- SCRAPING_BATCH_SIZE: バッチサイズ（デフォルト: 3, 推奨: 2-5）
+
+設定例:
+export SCRAPING_MAX_WORKERS=4
+export SCRAPING_BATCH_SIZE=5
 """
 
 import os
+
+from src.constants import DEFAULT_SCRAPING_BATCH_SIZE, DEFAULT_SCRAPING_MAX_WORKERS
 
 
 class Config:
@@ -16,6 +26,10 @@ class Config:
     # Selenium
     SELENIUM_BROWSER: str = "chrome"
     SELENIUM_REMOTE_URL: str | None = None
+
+    # Scraping
+    SCRAPING_MAX_WORKERS: int = DEFAULT_SCRAPING_MAX_WORKERS
+    SCRAPING_BATCH_SIZE: int = DEFAULT_SCRAPING_BATCH_SIZE
 
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -40,6 +54,10 @@ class Config:
         # Selenium Configuration
         cls.SELENIUM_BROWSER = os.getenv("SELENIUM_BROWSER", cls.SELENIUM_BROWSER)
         cls.SELENIUM_REMOTE_URL = os.getenv("SELENIUM_REMOTE_URL")
+
+        # Scraping Configuration
+        cls.SCRAPING_MAX_WORKERS = int(os.getenv("SCRAPING_MAX_WORKERS", cls.SCRAPING_MAX_WORKERS))
+        cls.SCRAPING_BATCH_SIZE = int(os.getenv("SCRAPING_BATCH_SIZE", cls.SCRAPING_BATCH_SIZE))
 
         # Logging Configuration
         cls.LOG_LEVEL = os.getenv("LOG_LEVEL", cls.LOG_LEVEL)
@@ -81,6 +99,13 @@ class Config:
         valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if cls.LOG_LEVEL not in valid_log_levels:
             errors.append(f"LOG_LEVEL must be one of: {', '.join(valid_log_levels)}")
+
+        # スクレイピング設定の妥当性チェック
+        if cls.SCRAPING_MAX_WORKERS < 1 or cls.SCRAPING_MAX_WORKERS > 10:
+            errors.append("SCRAPING_MAX_WORKERS must be between 1 and 10")
+
+        if cls.SCRAPING_BATCH_SIZE < 1 or cls.SCRAPING_BATCH_SIZE > 20:
+            errors.append("SCRAPING_BATCH_SIZE must be between 1 and 20")
 
         if errors:
             raise ValueError(f"Configuration errors: {'; '.join(errors)}")

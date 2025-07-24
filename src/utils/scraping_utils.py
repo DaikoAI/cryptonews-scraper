@@ -28,7 +28,7 @@ class TabManager:
         try:
             # 要素が有効かチェック
             try:
-                element.tag_name  # stale check
+                _ = element.tag_name  # stale check
                 is_displayed = element.is_displayed()
                 if not is_displayed:
                     self.logger.info("❌ Element is not displayed")
@@ -70,13 +70,18 @@ class TabManager:
             new_tab = new_tabs[-1]
             self.driver.switch_to.window(new_tab)
 
-            # ページ読み込み待機（より短い時間で）
+            # ページ読み込み待機（改良版）
             try:
-                WebDriverWait(self.driver, 3).until(
+                # 基本的なページ読み込み完了を待機
+                WebDriverWait(self.driver, 5).until(
                     lambda driver: driver.execute_script("return document.readyState") == "complete"
                 )
+                # 追加で少し待機（外部サイトのリダイレクト処理を考慮）
+                time.sleep(1)
             except TimeoutException:
-                pass  # タイムアウトしても続行
+                # タイムアウトしても続行（一部読み込みで十分な場合がある）
+                self.logger.debug("Page load timeout, but proceeding to get URL")
+                time.sleep(0.5)
 
             # URL取得
             url = self.driver.current_url
@@ -145,7 +150,9 @@ class TabManager:
 
                     # 新しいタブの出現を待機
                     try:
-                        WebDriverWait(self.driver, 2).until(lambda driver: len(driver.window_handles) > tabs_before)
+                        WebDriverWait(self.driver, 2).until(
+                            lambda driver, tabs=tabs_before: len(driver.window_handles) > tabs
+                        )
 
                         # 新しいタブに切り替え
                         new_tabs = [tab for tab in self.driver.window_handles if tab != original_tab]
@@ -200,7 +207,7 @@ class TabManager:
     def _is_element_valid(self, element) -> bool:
         """要素の有効性をチェック"""
         try:
-            element.tag_name  # stale check
+            _ = element.tag_name  # stale check
             return element.is_displayed()
         except Exception:
             return False
@@ -250,7 +257,7 @@ class TextCleaner:
     EXCLUDED_SUFFIXES = {"min"}
 
     @staticmethod
-    def is_valid_title(text: str, min_length: int = 10, max_length: int = 200) -> bool:
+    def is_valid_title(text: str, min_length: int = 5, max_length: int = 200) -> bool:
         """有効なタイトルかどうかを判定"""
         if not text or len(text) < min_length or len(text) > max_length:
             return False
@@ -267,8 +274,15 @@ class TextCleaner:
         if any(text.endswith(suffix) for suffix in TextCleaner.EXCLUDED_SUFFIXES):
             return False
 
-        # ドメイン名らしきもの（先頭に.がある）を除外
-        if "." in text[:15]:
+        # ドメイン名パターンをチェック（.com, .org など）
+        stripped = text.strip()
+        if len(stripped) < 30 and any(domain in stripped.lower() for domain in [".com", ".org", ".io", ".net"]):
+            return False
+
+        # 時間表示をチェック（"5min", "1h" など）
+        if len(stripped) < 10 and any(
+            time_indicator in stripped.lower() for time_indicator in ["min", "hour", "h", "ago"]
+        ):
             return False
 
         return True

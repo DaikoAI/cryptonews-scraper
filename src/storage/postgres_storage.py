@@ -1,7 +1,7 @@
 """
 PostgreSQL Storage Implementation
 
-Drizzle ORMのdata_sourceテーブルに対応したストレージ実装
+data_sourceテーブルにデータを保存するPostgreSQLストレージクラス
 """
 
 import json
@@ -40,30 +40,138 @@ class PostgresStorage:
             self.logger.info("PostgreSQL connection pool created successfully")
 
     async def save_data_sources(self, data_sources: list[DataSource]) -> int:
-        """データソースをdata_sourceテーブルに保存"""
-        if not self.pool:
-            await self.connect()
+        """データソースのバルク保存（重複チェック付き）"""
+        if not data_sources:
+            return 0
 
+        self.logger.info(f"💾 Saving {len(data_sources)} articles to database...")
+
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
+                    # 1. バルク重複チェック
+                    existing_urls = await self._get_existing_urls_bulk(conn, [ds.url for ds in data_sources])
+                    existing_urls_set = set(existing_urls)
+
+                    # 2. 重複記事の詳細ログ
+                    duplicate_sources = [ds for ds in data_sources if ds.url in existing_urls_set]
+                    if duplicate_sources:
+                        self.logger.info(f"🔄 Found {len(duplicate_sources)} duplicate articles:")
+                        for ds in duplicate_sources:
+                            self.logger.info(f"   - Duplicate: {ds.summary[:50]}... | {ds.url}")
+
+                    # 3. 新規データのみを抽出
+                    new_data_sources = [ds for ds in data_sources if ds.url not in existing_urls_set]
+
+                    if not new_data_sources:
+                        self.logger.info("✨ All articles already exist - no new data to save")
+                        return 0
+
+                    self.logger.info(f"🆕 Saving {len(new_data_sources)} new articles:")
+                    for ds in new_data_sources:
+                        self.logger.info(f"   - New: {ds.summary[:50]}... | {ds.url}")
+
+                    # 3. バルクinsert実行
+                    saved_count = await self._bulk_insert_data_sources(conn, new_data_sources)
+
+                    return saved_count
+
+        except Exception as e:
+            self.logger.error(f"❌ Bulk save operation failed: {e}")
+            raise
+
+    async def _get_existing_urls_bulk(self, conn: asyncpg.Connection, urls: list[str]) -> list[str]:
+        """複数URLの既存チェックを一度に実行"""
+        if not urls:
+            return []
+
+        # PostgreSQLのANY演算子で一度に複数URLをチェック
+        result = await conn.fetch("SELECT url FROM data_source WHERE url = ANY($1)", urls)
+        return [row["url"] for row in result]
+
+    async def _bulk_insert_data_sources(self, conn: asyncpg.Connection, data_sources: list[DataSource]) -> int:
+        """バルクinsert実行"""
+        if not data_sources:
+            return 0
+
+        # バリデーション: 無効なデータソースを除外
+        valid_data_sources = []
+        invalid_sources = []
+        for ds in data_sources:
+            if not ds.is_valid():
+                invalid_sources.append(ds)
+                continue
+            valid_data_sources.append(ds)
+
+        if invalid_sources:
+            self.logger.warning(f"❌ Found {len(invalid_sources)} invalid data sources:")
+            for ds in invalid_sources:
+                self.logger.warning(
+                    f"   - Invalid: {ds.summary[:50]}... | URL: {ds.url} | Type: {ds.type} | ID: {ds.id}"
+                )
+        else:
+            self.logger.info(f"✅ All {len(data_sources)} data sources passed validation")
+
+        if not valid_data_sources:
+            self.logger.warning("No valid data sources to insert")
+            return 0
+
+        try:
+            # データ準備（DataSourceクラスの実際の属性を使用）
+            insert_data = []
+            for ds in valid_data_sources:
+                # published_atのタイムゾーン情報を削除
+                published_at = ds.published_at
+                if published_at and published_at.tzinfo:
+                    published_at = published_at.replace(tzinfo=None)
+
+                # raw_contentをJSON文字列に変換
+                raw_content_json = json.dumps(ds.raw_content) if ds.raw_content else None
+
+                insert_data.append(
+                    (
+                        ds.id,
+                        ds.type,
+                        ds.url,
+                        ds.summary,
+                        published_at,
+                        raw_content_json,
+                    )
+                )
+
+            # executemanyでバルクinsert
+            await conn.executemany(
+                """
+                INSERT INTO data_source (
+                    id, type, url, summary, published_at, raw_content
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                insert_data,
+            )
+
+            self.logger.info(f"✅ Bulk inserted {len(valid_data_sources)} data sources")
+            self.logger.info(
+                f"📊 Save Summary: {len(valid_data_sources)} saved, {len(data_sources) - len(valid_data_sources)} failed validation"
+            )
+            return len(valid_data_sources)
+
+        except Exception as e:
+            self.logger.error(f"❌ Bulk insert failed: {e}")
+            # フォールバック: 個別insert
+            return await self._fallback_individual_insert(conn, valid_data_sources)
+
+    async def _fallback_individual_insert(self, conn: asyncpg.Connection, data_sources: list[DataSource]) -> int:
+        """フォールバック: 個別insert（デバッグ用）"""
+        self.logger.warning("Using fallback individual insert due to bulk insert failure")
         saved_count = 0
 
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                for data_source in data_sources:
-                    try:
-                        # 重複チェック (URL基準)
-                        if await self._data_source_exists_in_db(conn, data_source.url):
-                            self.logger.debug(f"Data source already exists: {data_source.url}")
-                            continue
+        for data_source in data_sources:
+            try:
+                await self._insert_data_source(conn, data_source)
+                saved_count += 1
+            except Exception as e:
+                self.logger.error(f"Individual insert failed for {data_source.url}: {e}")
 
-                        # data_sourceテーブルに挿入
-                        await self._insert_data_source(conn, data_source)
-                        saved_count += 1
-
-                    except Exception as e:
-                        self.logger.error(f"Failed to save data source {data_source.url}: {e}")
-                        continue
-
-        self.logger.info(f"Saved {saved_count} new data sources to PostgreSQL")
         return saved_count
 
     async def _data_source_exists_in_db(self, conn: asyncpg.Connection, url: str) -> bool:
